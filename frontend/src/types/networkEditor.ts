@@ -8,10 +8,9 @@ export interface ProcessNodeData {
   
   // IE指標
   cycleTime: number;            // サイクルタイム（秒）
-  setupTime: number;            // 段取り時間（秒）
+  setupTime: number;            // 段取り時間（秒）- 出力製品が未設定の場合のデフォルト値
   equipmentCount: number;       // 設備台数
   operatorCount: number;        // 作業者数
-  availability: number;         // 可動率（%）
   
   // バッファ設定
   inputBufferCapacity: number;  // 入力バッファ容量
@@ -87,7 +86,6 @@ export const nodeTemplates = {
     setupTime: 300,
     equipmentCount: 1,
     operatorCount: 1,
-    availability: 85,
     inputBufferCapacity: 50,
     outputBufferCapacity: 50,
     defectRate: 2,
@@ -102,7 +100,6 @@ export const nodeTemplates = {
     setupTime: 600,
     equipmentCount: 1,
     operatorCount: 2,
-    availability: 90,
     inputBufferCapacity: 30,
     outputBufferCapacity: 30,
     defectRate: 1,
@@ -114,10 +111,9 @@ export const nodeTemplates = {
     name: '検査',
     type: 'inspection' as const,
     cycleTime: 30,
-    setupTime: 60,
+    setupTime: 180,
     equipmentCount: 1,
     operatorCount: 1,
-    availability: 95,
     inputBufferCapacity: 20,
     outputBufferCapacity: 20,
     defectRate: 0,
@@ -132,7 +128,6 @@ export const nodeTemplates = {
     setupTime: 0,
     equipmentCount: 1,
     operatorCount: 0,
-    availability: 100,
     inputBufferCapacity: 1000,
     outputBufferCapacity: 1000,
     defectRate: 0,
@@ -147,7 +142,6 @@ export const nodeTemplates = {
     setupTime: 1800,
     equipmentCount: 1,
     operatorCount: 3,
-    availability: 95,
     inputBufferCapacity: 200,
     outputBufferCapacity: 0,
     defectRate: 0,

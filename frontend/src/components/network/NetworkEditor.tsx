@@ -133,6 +133,9 @@ const NetworkEditor = () => {
   const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const [contextMenuNode, setContextMenuNode] = useState<Node<ProcessNodeData> | null>(null);
 
+  // 品質選択の状態管理
+  const [qualitySelection, setQualitySelection] = useState<'good' | 'defective' | 'both' | undefined>(undefined);
+
   // プロジェクトが変更されたときにネットワークデータを読み込む
   useEffect(() => {
     if (currentProject?.id) {
@@ -145,9 +148,34 @@ const NetworkEditor = () => {
     if (networkData) {
       setNodes(networkData.nodes || []);
       setEdges(networkData.edges || []);
-      setIsInitialized(true);
     }
-  }, [networkData, setNodes, setEdges]);
+  }, [networkData]);
+
+  // processAdvancedDataの変更を監視し、材料設定の変更があった場合に永続化
+  useEffect(() => {
+    if (processAdvancedData.size > 0 && currentProject?.id) {
+      console.log('processAdvancedData changed, updating project network...');
+      console.log('Current processAdvancedData size:', processAdvancedData.size);
+      
+      // 材料設定の変更を即座に永続化
+      const timeoutId = setTimeout(() => {
+        dispatch(updateProjectNetwork({
+          projectId: currentProject.id,
+          networkData: {
+            nodes: nodes,
+            edges: edges,
+            products: networkData?.products || [],
+            bom_items: networkData?.bom_items || [],
+            variants: networkData?.variants || [],
+            process_advanced_data: Object.fromEntries(processAdvancedData),
+          }
+        }));
+        console.log('Process advanced data updated and persisted');
+      }, 500); // 500msのデバウンス
+      
+      return () => clearTimeout(timeoutId);
+    }
+  }, [processAdvancedData, currentProject?.id, nodes, edges, networkData, dispatch]);
 
   // 接続削除時に関連する材料を自動削除する関数
   const cleanupMaterialsOnEdgeRemoval = useCallback((removedEdges: Edge[], currentProcessData: Map<string, AdvancedProcessData>, currentNodes: Node<ProcessNodeData>[]) => {
@@ -242,11 +270,54 @@ const NetworkEditor = () => {
       }
     };
 
+    // 材料設定ダイアログを開くイベントをリッスン
+    const handleOpenMaterialDialog = (event: CustomEvent) => {
+      console.log('NetworkEditor: openMaterialDialog event received:', event.detail);
+      const { nodeId, nodeData } = event.detail;
+      
+      // 既存の材料データがあるかチェック
+      let existingData = processAdvancedData.get(nodeId);
+      if (!existingData) {
+        // 新規作成
+        existingData = {
+          id: nodeId,
+          label: nodeData.label,
+          type: nodeData.type,
+          cycleTime: nodeData.cycleTime,
+          setupTime: nodeData.setupTime,
+          equipmentCount: nodeData.equipmentCount,
+          operatorCount: nodeData.operatorCount,
+          availability: 85,
+          inputMaterials: [],
+          outputProducts: [],
+          bomMappings: [],
+          schedulingMode: 'push',
+          batchSize: 1,
+          minBatchSize: 1,
+          maxBatchSize: 100,
+          defectRate: nodeData.defectRate,
+          reworkRate: nodeData.reworkRate,
+          operatingCost: nodeData.operatingCost,
+          qualityCheckpoints: [],
+          skillRequirements: [],
+          toolRequirements: [],
+          capacityConstraints: [],
+          setupHistory: [],
+        };
+      }
+      
+      setSelectedProcessForMaterial(existingData);
+      setMaterialDialogOpen(true);
+    };
+
     window.addEventListener('processNodeSettings', handleProcessNodeSettings as EventListener);
+    window.addEventListener('openMaterialDialog', handleOpenMaterialDialog as EventListener);
+    
     return () => {
       window.removeEventListener('processNodeSettings', handleProcessNodeSettings as EventListener);
+      window.removeEventListener('openMaterialDialog', handleOpenMaterialDialog as EventListener);
     };
-  }, [nodes]);
+  }, [nodes, processAdvancedData]);
 
   // 生産管理データ
   const [products, setProducts] = useState<Product[]>([]);
@@ -289,10 +360,10 @@ const NetworkEditor = () => {
             label: contextMenuNode.data.label,
             type: contextMenuNode.data.type,
             cycleTime: contextMenuNode.data.cycleTime,
-            setupTime: contextMenuNode.data.setupTime,
+            setupTime: contextMenuNode.data.setupTime, // 基本設定の段取り時間
             equipmentCount: contextMenuNode.data.equipmentCount,
             operatorCount: contextMenuNode.data.operatorCount,
-            availability: contextMenuNode.data.availability,
+            availability: 85, // デフォルト値
             inputMaterials: [],
             outputProducts: [],
             bomMappings: [],
@@ -324,10 +395,10 @@ const NetworkEditor = () => {
             label: contextMenuNode.data.label,
             type: contextMenuNode.data.type,
             cycleTime: contextMenuNode.data.cycleTime,
-            setupTime: contextMenuNode.data.setupTime,
+            setupTime: contextMenuNode.data.setupTime, // 基本設定の段取り時間
             equipmentCount: contextMenuNode.data.equipmentCount,
             operatorCount: contextMenuNode.data.operatorCount,
-            availability: contextMenuNode.data.availability,
+            availability: 85, // デフォルト値
             inputMaterials: [],
             outputProducts: [],
             bomMappings: [],
@@ -452,6 +523,30 @@ const NetworkEditor = () => {
         unitCost: 2000,
         leadTime: 10,
       },
+      {
+        id: 'prod_steel_defective',
+        name: '鋼材（不良品）',
+        code: 'STEEL-001-DEF',
+        type: 'defective_product',
+        version: '1.0',
+        unitCost: 100,
+        leadTime: 1,
+        isDefective: true,
+        qualityGrade: 'defective',
+        originalProductId: 'prod_steel',
+      },
+      {
+        id: 'prod_bracket_defective',
+        name: 'ブラケット（不良品）',
+        code: 'BRKT-001-DEF',
+        type: 'defective_product',
+        version: '1.0',
+        unitCost: 200,
+        leadTime: 1,
+        isDefective: true,
+        qualityGrade: 'defective',
+        originalProductId: 'prod_bracket',
+      },
     ];
 
     const sampleBOMItems: BOMItem[] = [
@@ -567,7 +662,9 @@ const NetworkEditor = () => {
   }, [memoizedNetworkData, dispatch, isInitialized, currentProject?.id, networkData, processAdvancedData]);
 
   // 前工程の出力製品を次工程の入力材料として設定する関数
-  const inheritProductFlow = useCallback((sourceNodeId: string, targetNodeId: string, restrictToProductIds?: string[]) => {
+  const inheritProductFlow = useCallback((sourceNodeId: string, targetNodeId: string, restrictToProductIds?: string[], qualitySelection?: 'good' | 'defective' | 'both') => {
+    console.log('inheritProductFlow called:', { sourceNodeId, targetNodeId, restrictToProductIds, qualitySelection });
+    
     const sourceProcessData = processAdvancedData.get(sourceNodeId);
     
     if (sourceProcessData && sourceProcessData.outputProducts.length > 0) {
@@ -576,15 +673,21 @@ const NetworkEditor = () => {
         ? sourceProcessData.outputProducts.filter((o: ProductOutput) => restrictToProductIds.includes(o.productId))
         : sourceProcessData.outputProducts;
       
+      console.log('Filtered output products:', outputProducts);
+      console.log('Only source process output products are used as input materials');
+      
       // 次工程のデータを取得または作成
       const targetNode = nodes.find((node: Node) => node.id === targetNodeId);
-      if (!targetNode) return;
+      if (!targetNode) {
+        console.error('Target node not found:', targetNodeId);
+        return;
+      }
       
       let targetProcessData = processAdvancedData.get(targetNodeId);
       
       if (!targetProcessData) {
         // 次工程のAdvancedProcessDataを新規作成
-        targetProcessData = {
+        const newTargetProcessData: AdvancedProcessData = {
           id: targetNodeId,
           label: targetNode.data.label,
           type: targetNode.data.type,
@@ -592,7 +695,7 @@ const NetworkEditor = () => {
           setupTime: targetNode.data.setupTime,
           equipmentCount: targetNode.data.equipmentCount,
           operatorCount: targetNode.data.operatorCount,
-          availability: targetNode.data.availability,
+          availability: targetNode.data.availability || 85,
           inputMaterials: [],
           outputProducts: [],
           bomMappings: [],
@@ -609,45 +712,93 @@ const NetworkEditor = () => {
           capacityConstraints: [],
           setupHistory: [],
         };
+        
+        // 新規作成されたデータを保存
+        setProcessAdvancedData(prev => new Map(prev.set(targetNodeId, newTargetProcessData)));
+        
+        // targetProcessDataを更新
+        targetProcessData = newTargetProcessData;
+        console.log('Created new target process data:', newTargetProcessData);
       }
       
       // 前工程の出力製品を次工程の入力材料として追加
-      const newInputMaterials: MaterialInput[] = outputProducts.map((output: ProductOutput) => ({
-        materialId: output.productId,
-        materialName: output.productName,
-        requiredQuantity: output.outputQuantity,
-        unit: output.unit,
-        timing: 'start' as const,
-        qualitySpec: {
-          parameter: 'visual_inspection',
-          targetValue: 100,
-          upperLimit: 100,
-          lowerLimit: 95,
-          unit: '%',
-          measurementMethod: 'visual',
-        },
-        storageLocation: 'line_side',
-        supplyMethod: 'automated' as const,
-        sourceProcessId: sourceNodeId, // ソース工程IDを記録
-        isAutoInherited: true, // 自動継承された材料かどうか
-        // デフォルトのスケジューリング設定
-        schedulingMode: 'push' as const,
-        batchSize: 1,
-        minBatchSize: 1,
-        maxBatchSize: 100,
-        // デフォルトのかんばん設定
-        kanbanSettings: {
-          enabled: false,
-          cardCount: 5,
-          reorderPoint: 10,
-          maxInventory: 50,
-          supplierLeadTime: 3,
-          kanbanType: 'production' as const
+      const newInputMaterials: MaterialInput[] = outputProducts.map((output: ProductOutput) => {
+        // 前工程の不良率を確認
+        const sourceNode = nodes.find(n => n.id === sourceNodeId);
+        const hasDefectRate = sourceNode?.data.defectRate && sourceNode.data.defectRate > 0;
+        
+        // 品質選択に基づいて不良品かどうかを判定
+        let isDefective = false;
+        let qualityGrade: 'A' | 'B' | 'C' | 'defective' = 'A';
+        
+        if (hasDefectRate && qualitySelection) {
+          switch (qualitySelection) {
+            case 'good':
+              isDefective = false;
+              qualityGrade = 'A';
+              break;
+            case 'defective':
+              isDefective = true;
+              qualityGrade = 'defective';
+              break;
+            case 'both':
+              // 両方の場合、実際の不良率に基づいて判定
+              isDefective = Math.random() < (sourceNode!.data.defectRate / 100);
+              qualityGrade = isDefective ? 'defective' : 'A';
+              break;
+          }
+        } else if (hasDefectRate) {
+          // 品質選択が指定されていない場合、実際の不良率に基づいて判定
+          isDefective = Math.random() < (sourceNode!.data.defectRate / 100);
+          qualityGrade = isDefective ? 'defective' : 'A';
         }
-      }));
+        
+        const newMaterial: MaterialInput = {
+          materialId: output.productId,
+          materialName: output.productName,
+          requiredQuantity: output.outputQuantity,
+          unit: output.unit,
+          timing: 'start' as const,
+          qualitySpec: {
+            parameter: 'visual_inspection',
+            targetValue: 100,
+            upperLimit: 100,
+            lowerLimit: 95,
+            unit: '%',
+            measurementMethod: 'visual',
+          },
+          storageLocation: 'line_side',
+          supplyMethod: 'automated' as const,
+          sourceProcessId: sourceNodeId, // ソース工程IDを記録
+          isAutoInherited: true, // 自動継承された材料かどうか
+          isDefective: isDefective, // 不良品かどうか
+          qualityGrade: qualityGrade, // 品質グレード
+          originalProductId: isDefective ? output.productId : undefined, // 元製品ID
+          // デフォルトのスケジューリング設定
+          schedulingMode: 'push' as const,
+          batchSize: 1,
+          minBatchSize: 1,
+          maxBatchSize: 100,
+          // デフォルトのかんばん設定
+          kanbanSettings: {
+            enabled: false,
+            cardCount: 5,
+            reorderPoint: 10,
+            maxInventory: 50,
+            supplierLeadTime: 3,
+            kanbanType: 'production' as const
+          }
+        };
+        
+        console.log('Created new input material:', newMaterial);
+        return newMaterial;
+      });
       
       // 既存の入力材料と重複チェック（同じソース工程からの材料は除外して置き換え）
-      if (!targetProcessData) return;
+      if (!targetProcessData) {
+        console.error('Target process data not found after creation');
+        return;
+      }
       
       const filteredExistingMaterials = targetProcessData.inputMaterials.filter(
         (material: MaterialInput) => !(material.isAutoInherited && material.sourceProcessId === sourceNodeId)
@@ -657,6 +808,12 @@ const NetworkEditor = () => {
       const uniqueNewMaterials = newInputMaterials.filter(
         (material: MaterialInput) => !existingMaterialIds.includes(material.materialId)
       );
+      
+      console.log('Filtered materials:', {
+        existing: filteredExistingMaterials.length,
+        new: newInputMaterials.length,
+        unique: uniqueNewMaterials.length
+      });
       
       if (uniqueNewMaterials.length > 0) {
         const updatedTargetData = {
@@ -670,16 +827,47 @@ const NetworkEditor = () => {
         console.log(`工程連携: ${sourceProcessData.label} → ${targetProcessData.label || '未知の工程'}`);
         console.log('継承された材料:', uniqueNewMaterials.map((m: MaterialInput) => m.materialName).join(', '));
         
-        // ユーザーに成功メッセージを表示
+        // ユーザーに通知
         const materialNames = uniqueNewMaterials.map((m: MaterialInput) => m.materialName).join(', ');
+        const defectiveCount = uniqueNewMaterials.filter((m: MaterialInput) => m.isDefective).length;
+        const goodCount = uniqueNewMaterials.filter((m: MaterialInput) => !m.isDefective).length;
+        
         setTimeout(() => {
           if (targetProcessData) {
-            alert(`✅ 工程連携完了!\n${sourceProcessData.label} → ${targetProcessData.label || '未知の工程'}\n継承された材料: ${materialNames}`);
+            let message = `✅ 工程連携完了!\n${sourceProcessData.label} → ${targetProcessData.label || '未知の工程'}\n継承された材料: ${materialNames}`;
+            
+            // 品質選択の結果を表示
+            if (qualitySelection) {
+              message += `\n\n🔍 品質選択: ${
+                qualitySelection === 'good' ? '✅ 良品のみ' :
+                qualitySelection === 'defective' ? '⚠️ 不良品のみ' :
+                '🔄 両方（不良率に基づく）'
+              }`;
+            }
+            
+            if (defectiveCount > 0) {
+              message += `\n⚠️ 不良品: ${defectiveCount}種類`;
+            }
+            if (goodCount > 0) {
+              message += `\n✅ 良品: ${goodCount}種類`;
+            }
+            
+            // 不良品処理の説明を追加
+            if (defectiveCount > 0) {
+              message += `\n\n📋 不良品処理: 次工程で不良品として扱われます`;
+            }
+            
+            message += `\n\n📋 材料は自動的に次工程の入力材料に設定されました`;
+            alert(message);
           }
         }, 500);
+      } else {
+        console.log('No new materials to add');
       }
+    } else {
+      console.log('No output products found in source process');
     }
-  }, [processAdvancedData, nodes]);
+  }, [processAdvancedData, nodes, setProcessAdvancedData]);
 
   // エッジ接続時の処理
   const onConnect = useCallback(
@@ -717,20 +905,177 @@ const NetworkEditor = () => {
 
       // 出力製品の選択が必要か確認
       if (params.source && params.target) {
+        console.log('Checking connection requirements:', { source: params.source, target: params.target });
+        
         const sourceData = processAdvancedData.get(params.source);
-        if (sourceData && sourceData.outputProducts.length > 1) {
-          // 複数ある場合は選択ダイアログを表示
-          setSelectableOutputs(sourceData.outputProducts.map((o: ProductOutput) => ({ productId: o.productId, productName: o.productName })));
-          setSelectedOutputIds(sourceData.outputProducts.map((o: ProductOutput) => o.productId)); // 既定は全選択
-          setPendingConnect({ source: params.source, target: params.target });
-          setSelectOutputDialogOpen(true);
+        const sourceNode = nodes.find(n => n.id === params.source);
+        
+        console.log('Source data:', sourceData);
+        console.log('Source node:', sourceNode);
+        
+        if (sourceData && sourceData.outputProducts.length > 0) {
+          console.log('Source has output products:', sourceData.outputProducts);
+          
+          // 接続元の工程に不良率があるかチェック
+          const hasDefectRate = sourceNode?.data.defectRate && sourceNode.data.defectRate > 0;
+          console.log('Source has defect rate:', hasDefectRate, sourceNode?.data.defectRate);
+          
+          if (sourceData.outputProducts.length > 1) {
+            // 複数ある場合は選択ダイアログを表示
+            console.log('Multiple output products, showing selection dialog');
+            console.log('Available outputs:', sourceData.outputProducts.map(o => ({ id: o.productId, name: o.productName })));
+            
+            // 接続元の出力製品のみを選択候補として表示
+            setSelectableOutputs(sourceData.outputProducts.map((o: ProductOutput) => ({ 
+              productId: o.productId, 
+              productName: o.productName 
+            })));
+            setSelectedOutputIds(sourceData.outputProducts.map((o: ProductOutput) => o.productId)); // 既定は全選択
+            setPendingConnect({ source: params.source, target: params.target });
+            setSelectOutputDialogOpen(true);
+          } else if (hasDefectRate) {
+            // 単一の出力製品で不良率がある場合は品質選択ダイアログを表示
+            console.log('Single output product with defect rate, showing quality selection dialog');
+            setSelectableOutputs(sourceData.outputProducts.map((o: ProductOutput) => ({ 
+              productId: o.productId, 
+              productName: o.productName 
+            })));
+            setSelectedOutputIds(sourceData.outputProducts.map((o: ProductOutput) => o.productId));
+            setPendingConnect({ source: params.source, target: params.target });
+            setSelectOutputDialogOpen(true);
+          } else {
+            // 1件で不良率がない場合は自動継承（良品のみ）
+            console.log('Single output product without defect rate, auto-inheriting (good quality only)');
+            console.log('Auto-inheriting product:', sourceData.outputProducts[0]);
+            inheritProductFlow(params.source, params.target, undefined, 'good');
+          }
         } else {
-          // 1件以下は自動継承
-          inheritProductFlow(params.source, params.target);
+          // 出力製品が設定されていない場合
+          console.log('接続完了: 出力製品が設定されていない工程からの接続');
+          console.log('Source process data:', sourceData);
+          console.log('Source node:', sourceNode);
+          
+          // 接続元の工程にも出力製品の設定を促す
+          let sourceProcessData = processAdvancedData.get(params.source);
+          if (!sourceProcessData) {
+            // 接続元の工程のAdvancedProcessDataを新規作成
+            const sourceNode = nodes.find((node: Node) => node.id === params.source);
+            if (sourceNode) {
+              const newSourceProcessData: AdvancedProcessData = {
+                id: params.source,
+                label: sourceNode.data.label,
+                type: sourceNode.data.type,
+                cycleTime: sourceNode.data.cycleTime,
+                setupTime: sourceNode.data.setupTime,
+                equipmentCount: sourceNode.data.equipmentCount,
+                operatorCount: sourceNode.data.operatorCount,
+                availability: sourceNode.data.availability || 85,
+                inputMaterials: [],
+                outputProducts: [],
+                bomMappings: [],
+                schedulingMode: 'push',
+                batchSize: 1,
+                minBatchSize: 1,
+                maxBatchSize: 100,
+                defectRate: sourceNode.data.defectRate,
+                reworkRate: sourceNode.data.reworkRate,
+                operatingCost: sourceNode.data.operatingCost,
+                qualityCheckpoints: [],
+                skillRequirements: [],
+                toolRequirements: [],
+                capacityConstraints: [],
+                setupHistory: [],
+              };
+              
+              // 新規作成されたデータを保存
+              setProcessAdvancedData(prev => new Map(prev.set(params.source!, newSourceProcessData)));
+              sourceProcessData = newSourceProcessData;
+              console.log('Created new source process data:', newSourceProcessData);
+            }
+          }
+          
+          // 次工程のデータを取得または作成（基本設定のみ）
+          const targetNode = nodes.find((node: Node) => node.id === params.target);
+          if (targetNode && params.target) {
+            let targetProcessData = processAdvancedData.get(params.target);
+            
+            if (!targetProcessData) {
+              // 次工程のAdvancedProcessDataを新規作成
+              const newTargetProcessData: AdvancedProcessData = {
+                id: params.target,
+                label: targetNode.data.label,
+                type: targetNode.data.type,
+                cycleTime: targetNode.data.cycleTime,
+                setupTime: targetNode.data.setupTime,
+                equipmentCount: targetNode.data.equipmentCount,
+                operatorCount: targetNode.data.operatorCount,
+                availability: targetNode.data.availability || 85,
+                inputMaterials: [],
+                outputProducts: [],
+                bomMappings: [],
+                schedulingMode: 'push',
+                batchSize: 1,
+                minBatchSize: 1,
+                maxBatchSize: 100,
+                defectRate: targetNode.data.defectRate,
+                reworkRate: targetNode.data.reworkRate,
+                operatingCost: targetNode.data.operatingCost,
+                qualityCheckpoints: [],
+                skillRequirements: [],
+                toolRequirements: [],
+                capacityConstraints: [],
+                setupHistory: [],
+              };
+              
+              // 新規作成されたデータを保存
+              setProcessAdvancedData(prev => new Map(prev.set(params.target!, newTargetProcessData)));
+              
+              // targetProcessDataを更新
+              targetProcessData = newTargetProcessData;
+            }
+            
+            // 接続完了後、材料設定ダイアログを自動で開く
+            setTimeout(() => {
+              const result = window.confirm(
+                `🔗 工程接続完了!\n\n` +
+                `${sourceNode?.data.label || '前工程'} → ${targetNode.data.label}\n\n` +
+                `📝 材料設定が必要です。今すぐ設定しますか？\n\n` +
+                `• 「OK」：材料設定ダイアログを開く\n` +
+                `• 「キャンセル」：後で手動で設定`
+              );
+              
+              if (result) {
+                // 材料設定ダイアログを開く
+                if (targetProcessData) {
+                  setSelectedProcessForMaterial(targetProcessData);
+                  setMaterialDialogOpen(true);
+                }
+              } else {
+                alert(
+                  `📋 材料設定の手順\n\n` +
+                  `1. 工程を右クリック → 「材料設定」を選択\n` +
+                  `2. 「投入材料」タブで前工程からの材料を設定\n` +
+                  `3. 「出力製品」タブでこの工程の出力を設定\n` +
+                  `4. 設定完了後、次工程との接続で材料が自動継承されます\n\n` +
+                  `💡 重要なポイント：\n` +
+                  `• 接続元の工程の出力製品のみが、接続先の投入材料候補になります\n` +
+                  `• 複数の出力製品がある場合は、接続時に選択できます\n` +
+                  `• 接続元の出力製品以外のものは投入材料候補に含まれません\n` +
+                  `• 前工程（${sourceNode?.data.label || '前工程'}）の出力製品を設定すると、\n` +
+                  `  次工程（${targetNode.data.label}）の投入材料として自動設定されます\n` +
+                  `• 不良率が設定されている工程では、良品・不良品の選択も可能です\n\n` +
+                  `⚠️ 品質選択について：\n` +
+                  `• 不良率設定工程からの接続時は、品質選択ダイアログが表示されます\n` +
+                  `• 「良品のみ」「不良品のみ」「両方（不良率に基づく）」から選択できます\n` +
+                  `• 選択された品質に基づいて、投入材料の品質情報が設定されます`
+                );
+              }
+            }, 500);
+          }
         }
       }
     },
-    [setEdges, edges, inheritProductFlow]
+    [edges, setEdges, processAdvancedData, nodes, inheritProductFlow]
   );
 
   // ドラッグオーバーイベント
@@ -849,7 +1194,6 @@ const NetworkEditor = () => {
         operatorCount: 1,
         cycleTime: 60,
         setupTime: 300,
-        availability: 85,
         inputBufferCapacity: 50,
         outputBufferCapacity: 100,
         defectRate: 2.0,
@@ -865,7 +1209,6 @@ const NetworkEditor = () => {
         operatorCount: 2,
         cycleTime: 120,
         setupTime: 600,
-        availability: 90,
         inputBufferCapacity: 30,
         outputBufferCapacity: 50,
         defectRate: 1.0,
@@ -881,7 +1224,6 @@ const NetworkEditor = () => {
         operatorCount: 1,
         cycleTime: 30,
         setupTime: 180,
-        availability: 95,
         inputBufferCapacity: 20,
         outputBufferCapacity: 20,
         defectRate: 0.5,
@@ -897,7 +1239,6 @@ const NetworkEditor = () => {
         operatorCount: 0,
         cycleTime: 5,
         setupTime: 0,
-        availability: 99,
         inputBufferCapacity: 1000,
         outputBufferCapacity: 1000,
         defectRate: 0,
@@ -913,7 +1254,6 @@ const NetworkEditor = () => {
         operatorCount: 2,
         cycleTime: 45,
         setupTime: 120,
-        availability: 95,
         inputBufferCapacity: 100,
         outputBufferCapacity: 0,
         defectRate: 0,
@@ -931,7 +1271,6 @@ const NetworkEditor = () => {
       operatorCount: 1,
       cycleTime: 60,
       setupTime: 300,
-      availability: 85,
       inputBufferCapacity: 50,
       outputBufferCapacity: 100,
       defectRate: 1.0,
@@ -1123,6 +1462,42 @@ const NetworkEditor = () => {
       setLoading(false);
     }
   };
+
+  // 前工程の出力製品を取得する関数
+  const getPrecedingOutputs = useCallback((processId: string): Product[] => {
+    const precedingEdges = edges.filter(edge => edge.target === processId);
+    const precedingOutputs: Product[] = [];
+    
+    precedingEdges.forEach(edge => {
+      const sourceProcessData = processAdvancedData.get(edge.source);
+      if (sourceProcessData && sourceProcessData.outputProducts.length > 0) {
+        sourceProcessData.outputProducts.forEach(output => {
+          // 出力製品に対応するProductを検索
+          const product = products.find(p => p.id === output.productId);
+          if (product) {
+            // 不良品も含めて追加
+            precedingOutputs.push(product);
+            
+            // 元の製品が不良品の場合、元製品も候補に追加
+            if (product.isDefective && product.originalProductId) {
+              const originalProduct = products.find(p => p.id === product.originalProductId);
+              if (originalProduct && !precedingOutputs.find(p => p.id === originalProduct.id)) {
+                precedingOutputs.push(originalProduct);
+              }
+            }
+          }
+        });
+      }
+    });
+    
+    return precedingOutputs;
+  }, [edges, processAdvancedData, products]);
+
+  // 工程が保管庫かどうかを判定する関数
+  const isStorageProcess = useCallback((processId: string): boolean => {
+    const node = nodes.find(n => n.id === processId);
+    return node?.data.type === 'storage';
+  }, [nodes]);
 
   
 
@@ -1591,6 +1966,7 @@ const NetworkEditor = () => {
           <ProcessEditDialog
             open={processEditDialogOpen}
             nodeData={selectedNode?.data || null}
+            nodeId={selectedNode?.id} // 工程IDを追加
             onClose={() => {
               setProcessEditDialogOpen(false);
               setSelectedNode(null);
@@ -1628,9 +2004,15 @@ const NetworkEditor = () => {
           />
 
           {/* 出力製品選択ダイアログ */}
-          <Dialog open={selectOutputDialogOpen} onClose={() => setSelectOutputDialogOpen(false)}>
+          <Dialog open={selectOutputDialogOpen} onClose={() => setSelectOutputDialogOpen(false)} maxWidth="md" fullWidth>
             <DialogTitle>受け渡す出力製品を選択</DialogTitle>
             <DialogContent>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                前工程から次工程に受け渡す製品を選択してください。複数選択可能です。
+                <br />
+                <strong>※ 接続元の工程の出力製品のみが選択可能です</strong>
+              </Typography>
+              
               <List>
                 {selectableOutputs.map(item => {
                   const labelId = `select-output-${item.productId}`;
@@ -1659,16 +2041,140 @@ const NetworkEditor = () => {
               {selectableOutputs.length === 0 && (
                 <Typography color="text.secondary">選択可能な出力製品がありません</Typography>
               )}
+              
+              {/* 選択された製品の確認 */}
+              {selectedOutputIds.length > 0 && (
+                <Box sx={{ mt: 2, p: 2, backgroundColor: 'success.light', borderRadius: 1 }}>
+                  <Typography variant="subtitle2" color="success.dark" gutterBottom>
+                    📋 選択された製品
+                  </Typography>
+                  <Typography variant="body2" color="success.dark">
+                    {selectedOutputIds.map(id => {
+                      const product = selectableOutputs.find(p => p.productId === id);
+                      return product?.productName || id;
+                    }).join(', ')}
+                  </Typography>
+                  <Typography variant="caption" color="success.dark" sx={{ display: 'block', mt: 1 }}>
+                    これらの製品が次工程の投入材料として設定されます
+                  </Typography>
+                </Box>
+              )}
+              
+              {/* 不良品・良品選択 */}
+              {pendingConnect && (() => {
+                const sourceNode = nodes.find(n => n.id === pendingConnect.source);
+                const hasDefectRate = sourceNode?.data.defectRate && sourceNode.data.defectRate > 0;
+                return hasDefectRate ? (
+                  <Box sx={{ mt: 3, p: 2, border: '1px solid', borderColor: 'warning.main', borderRadius: 1, backgroundColor: 'warning.light' }}>
+                    <Typography variant="subtitle2" color="warning.dark" gutterBottom>
+                      ⚠️ 不良率設定工程からの接続
+                    </Typography>
+                    <Typography variant="body2" color="warning.dark" gutterBottom>
+                      {sourceNode?.data.label}（不良率: {sourceNode?.data.defectRate}%）からの接続です。
+                      次工程に送る製品の品質を選択してください。
+                    </Typography>
+                    <Box sx={{ display: 'flex', gap: 2, mt: 2, flexWrap: 'wrap' }}>
+                      <Button
+                        variant="outlined"
+                        color="success"
+                        onClick={() => {
+                          // 良品のみを選択
+                          setSelectedOutputIds(selectableOutputs.map(o => o.productId));
+                          setQualitySelection('good');
+                        }}
+                        sx={{ minWidth: 120 }}
+                        startIcon={<span>✅</span>}
+                      >
+                        良品のみ
+                      </Button>
+                      <Button
+                        variant="outlined"
+                        color="error"
+                        onClick={() => {
+                          // 不良品のみを選択
+                          setSelectedOutputIds(selectableOutputs.map(o => o.productId));
+                          setQualitySelection('defective');
+                        }}
+                        sx={{ minWidth: 120 }}
+                        startIcon={<span>⚠️</span>}
+                      >
+                        不良品のみ
+                      </Button>
+                      <Button
+                        variant="outlined"
+                        color="info"
+                        onClick={() => {
+                          // 両方を選択
+                          setSelectedOutputIds(selectableOutputs.map(o => o.productId));
+                          setQualitySelection('both');
+                        }}
+                        sx={{ minWidth: 120 }}
+                        startIcon={<span>🔄</span>}
+                      >
+                        両方（不良率に基づく）
+                      </Button>
+                    </Box>
+                    
+                    {/* 現在の選択状態を表示 */}
+                    {qualitySelection && (
+                      <Box sx={{ mt: 2, p: 1, backgroundColor: 'info.light', borderRadius: 1 }}>
+                        <Typography variant="caption" color="info.dark">
+                          <strong>現在の選択:</strong> {
+                            qualitySelection === 'good' ? '✅ 良品のみ' :
+                            qualitySelection === 'defective' ? '⚠️ 不良品のみ' :
+                            '🔄 両方（不良率に基づく）'
+                          }
+                        </Typography>
+                      </Box>
+                    )}
+                    
+                    <Typography variant="caption" color="warning.dark" sx={{ display: 'block', mt: 2 }}>
+                      <strong>品質選択の説明:</strong><br/>
+                      • <strong>良品のみ</strong>：品質の良い製品のみを次工程に送る（不良品は除外）<br/>
+                      • <strong>不良品のみ</strong>：不良品のみを次工程に送る（修理・廃棄工程など）<br/>
+                      • <strong>両方（不良率に基づく）</strong>：実際の不良率（{sourceNode?.data.defectRate}%）に基づいて良品と不良品を振り分ける
+                    </Typography>
+                    
+                    <Typography variant="caption" color="info.dark" sx={{ display: 'block', mt: 1 }}>
+                      💡 <strong>推奨設定:</strong><br/>
+                      • 通常の生産工程 → 「良品のみ」または「両方」<br/>
+                      • 修理・廃棄工程 → 「不良品のみ」<br/>
+                      • 品質管理工程 → 「両方」で不良品を検出
+                    </Typography>
+                  </Box>
+                ) : null;
+              })()}
             </DialogContent>
             <DialogActions>
-              <Button onClick={() => setSelectOutputDialogOpen(false)}>キャンセル</Button>
-              <Button variant="contained" onClick={() => {
-                if (pendingConnect && selectedOutputIds.length > 0) {
-                  inheritProductFlow(pendingConnect.source, pendingConnect.target, selectedOutputIds);
-                }
+              <Button onClick={() => {
                 setSelectOutputDialogOpen(false);
                 setPendingConnect(null);
-              }}>受け渡し</Button>
+                setQualitySelection(undefined);
+                setSelectedOutputIds([]);
+              }}>
+                キャンセル
+              </Button>
+              <Button 
+                variant="contained" 
+                onClick={() => {
+                  if (pendingConnect && selectedOutputIds.length > 0) {
+                    console.log('Processing connection with:', {
+                      source: pendingConnect.source,
+                      target: pendingConnect.target,
+                      selectedOutputs: selectedOutputIds,
+                      qualitySelection
+                    });
+                    inheritProductFlow(pendingConnect.source, pendingConnect.target, selectedOutputIds, qualitySelection);
+                  }
+                  setSelectOutputDialogOpen(false);
+                  setPendingConnect(null);
+                  setQualitySelection(undefined);
+                  setSelectedOutputIds([]);
+                }}
+                disabled={selectedOutputIds.length === 0}
+              >
+                受け渡し実行
+              </Button>
             </DialogActions>
           </Dialog>
 
@@ -1696,16 +2202,44 @@ const NetworkEditor = () => {
             processData={selectedProcessForMaterial}
             products={products}
             onClose={() => {
+              console.log('ProcessMaterialDialog closed');
               setMaterialDialogOpen(false);
               setSelectedProcessForMaterial(null);
             }}
             onSave={(processData) => {
-              console.log('Process material data saved:', processData);
+              console.log('ProcessMaterialDialog onSave called with:', processData);
+              console.log('Current processAdvancedData size before save:', processAdvancedData.size);
+              
               // 工程の材料データを保存
-              setProcessAdvancedData(prev => new Map(prev.set(processData.id, processData)));
+              setProcessAdvancedData(prev => {
+                const newMap = new Map(prev);
+                newMap.set(processData.id, processData);
+                console.log('Updated processAdvancedData size:', newMap.size);
+                console.log('Saved process data for ID:', processData.id);
+                console.log('Saved data:', newMap.get(processData.id));
+                return newMap;
+              });
+              
+              // 保存完了の確認
+              setTimeout(() => {
+                const savedData = processAdvancedData.get(processData.id);
+                console.log('Verification - saved data retrieved:', savedData);
+                if (savedData) {
+                  console.log('✅ Process material data successfully saved');
+                  
+                  // 保存成功の通知
+                  alert(`✅ 工程材料設定が保存されました！\n\n工程: ${processData.label}\n投入材料: ${processData.inputMaterials.length}種類\n出力製品: ${processData.outputProducts.length}種類\n\nこれで、この工程との接続時に材料が自動継承されます。`);
+                } else {
+                  console.log('❌ Process material data not found after save');
+                  alert('❌ 保存に失敗しました。再度お試しください。');
+                }
+              }, 100);
+              
               setMaterialDialogOpen(false);
               setSelectedProcessForMaterial(null);
             }}
+            getPrecedingOutputs={getPrecedingOutputs}
+            isStorageProcess={selectedProcessForMaterial ? isStorageProcess(selectedProcessForMaterial.id) : false}
           />
 
           {/* コンテキストメニュー */}

@@ -31,6 +31,7 @@ import AdvancedProcessDialog from '../production/AdvancedProcessDialog';
 interface ProcessEditDialogProps {
   open: boolean;
   nodeData: ProcessNodeData | null;
+  nodeId?: string; // 工程IDを追加
   onClose: () => void;
   onSave: (data: ProcessNodeData) => void;
   products?: Product[];
@@ -53,11 +54,12 @@ const TabPanel: React.FC<TabPanelProps> = ({ children, value, index }) => {
 const ProcessEditDialog: React.FC<ProcessEditDialogProps> = ({
   open,
   nodeData,
+  nodeId, // 工程IDを追加
   onClose,
   onSave,
   products = [],
 }) => {
-  console.log('ProcessEditDialog: Rendered with open =', open, 'and nodeData =', nodeData);
+  console.log('ProcessEditDialog: Rendered with open =', open, 'and nodeData =', nodeData, 'and nodeId =', nodeId);
   const [tabValue, setTabValue] = useState(0);
   const [materialDialogOpen, setMaterialDialogOpen] = useState(false);
   const [advancedDialogOpen, setAdvancedDialogOpen] = useState(false);
@@ -70,7 +72,6 @@ const ProcessEditDialog: React.FC<ProcessEditDialogProps> = ({
     setupTime: 300,
     equipmentCount: 1,
     operatorCount: 1,
-    availability: 85,
     inputBufferCapacity: 50,
     outputBufferCapacity: 50,
     defectRate: 2,
@@ -93,7 +94,7 @@ const ProcessEditDialog: React.FC<ProcessEditDialogProps> = ({
     const value = event.target.value;
     // 数値フィールドの場合は数値に変換
     const numericFields = [
-      'cycleTime', 'setupTime', 'equipmentCount', 'operatorCount', 'availability',
+      'cycleTime', 'setupTime', 'equipmentCount', 'operatorCount',
       'inputBufferCapacity', 'outputBufferCapacity', 'defectRate', 'reworkRate', 'operatingCost'
     ];
     
@@ -102,7 +103,7 @@ const ProcessEditDialog: React.FC<ProcessEditDialogProps> = ({
     if (numericFields.includes(field)) {
       const numValue = Number(value) || 0;
       // 数値の範囲チェック
-      if (field === 'availability' || field === 'defectRate' || field === 'reworkRate') {
+      if (field === 'defectRate' || field === 'reworkRate') {
         // パーセンテージフィールドは0-100の範囲
         processedValue = Math.max(0, Math.min(100, numValue));
       } else if (field === 'equipmentCount' || field === 'operatorCount') {
@@ -207,12 +208,13 @@ const ProcessEditDialog: React.FC<ProcessEditDialogProps> = ({
               <TextField
                 fullWidth
                 type="number"
-                label="段取り時間"
-                value={editData.setupTime}
+                label="段取り時間（秒）"
+                value={editData.setupTime || 0}
                 onChange={handleChange('setupTime')}
                 InputProps={{
                   endAdornment: <InputAdornment position="end">秒</InputAdornment>,
                 }}
+                helperText="出力製品が未設定の場合のデフォルト段取り時間"
               />
             </Grid>
           </Grid>
@@ -241,19 +243,10 @@ const ProcessEditDialog: React.FC<ProcessEditDialogProps> = ({
               />
             </Grid>
             <Grid item xs={12}>
-              <Typography gutterBottom>可動率: {editData.availability}%</Typography>
-              <Slider
-                value={editData.availability}
-                onChange={handleSliderChange('availability')}
-                min={0}
-                max={100}
-                marks={[
-                  { value: 0, label: '0%' },
-                  { value: 50, label: '50%' },
-                  { value: 85, label: '85%' },
-                  { value: 100, label: '100%' },
-                ]}
-              />
+              <Typography gutterBottom>可動率: 計算結果</Typography>
+              <Typography variant="body2" color="text.secondary">
+                可動率は設備の稼働状況から自動計算されます
+              </Typography>
             </Grid>
             <Grid item xs={12} md={6}>
               <TextField
@@ -342,40 +335,33 @@ const ProcessEditDialog: React.FC<ProcessEditDialogProps> = ({
               variant="contained"
               startIcon={<MaterialIcon />}
               onClick={() => {
-                if (editData) {
-                  // editDataからAdvancedProcessDataを作成
-                  const advancedData: AdvancedProcessData = {
-                    id: editData.label || 'process',
-                    label: editData.label,
-                    type: editData.type,
-                    cycleTime: editData.cycleTime,
-                    setupTime: editData.setupTime,
-                    equipmentCount: editData.equipmentCount,
-                    operatorCount: editData.operatorCount,
-                    availability: editData.availability,
-                    inputMaterials: [],
-                    outputProducts: [],
-                    bomMappings: [],
-                    schedulingMode: 'push',
-                    batchSize: 1,
-                    minBatchSize: 1,
-                    maxBatchSize: 100,
-                    defectRate: editData.defectRate,
-                    reworkRate: editData.reworkRate,
-                    operatingCost: editData.operatingCost,
-                    qualityCheckpoints: [],
-                    skillRequirements: [],
-                    toolRequirements: [],
-                    capacityConstraints: [],
-                    setupHistory: [],
-                  };
-                  setProcessData(advancedData);
-                  setMaterialDialogOpen(true);
+                if (nodeId) {
+                  console.log('Opening material dialog for process:', nodeId);
+                  
+                  // NetworkEditorの材料設定ダイアログを直接開く
+                  // カスタムイベントを発火
+                  const event = new CustomEvent('openMaterialDialog', {
+                    detail: {
+                      nodeId: nodeId,
+                      nodeData: editData
+                    }
+                  });
+                  window.dispatchEvent(event);
+                  
+                  // ProcessEditDialogを閉じる
+                  onClose();
+                } else {
+                  console.error('No nodeId provided for material dialog');
+                  alert('工程IDが設定されていません。工程を右クリック → 「材料設定」から開いてください。');
                 }
               }}
             >
               材料設定を開く
             </Button>
+            
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 2 }}>
+              💡 ヒント: 工程を右クリック → 「材料設定」からも開けます
+            </Typography>
           </Box>
         </TabPanel>
 
@@ -394,16 +380,15 @@ const ProcessEditDialog: React.FC<ProcessEditDialogProps> = ({
               startIcon={<AdvancedIcon />}
               onClick={() => {
                 if (editData) {
-                  // editDataからAdvancedProcessDataを作成
                   const advancedData: AdvancedProcessData = {
                     id: editData.label || 'process',
                     label: editData.label,
                     type: editData.type,
                     cycleTime: editData.cycleTime,
-                    setupTime: editData.setupTime,
+                    setupTime: editData.setupTime, // 基本設定の段取り時間
                     equipmentCount: editData.equipmentCount,
                     operatorCount: editData.operatorCount,
-                    availability: editData.availability,
+                    availability: 85, // デフォルト値
                     inputMaterials: [],
                     outputProducts: [],
                     bomMappings: [],

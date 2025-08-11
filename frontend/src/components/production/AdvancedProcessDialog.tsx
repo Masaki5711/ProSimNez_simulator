@@ -150,6 +150,7 @@ const AdvancedProcessDialog: React.FC<AdvancedProcessDialogProps> = ({
       outputQuantity: 1,
       unit: '個',
       qualityLevel: 'standard',
+      setupTime: 0,
     };
     setEditData({
       ...editData,

@@ -34,7 +34,6 @@ export const convertToBackendFormat = (networkData: NetworkData) => {
       outputs: [], // エッジから計算
       cycleTime: node.data.cycleTime,
       setupTime: node.data.setupTime,
-      availability: node.data.availability,
       inputBufferCapacity: node.data.inputBufferCapacity,
       outputBufferCapacity: node.data.outputBufferCapacity,
       defectRate: node.data.defectRate,
@@ -87,7 +86,6 @@ export const convertFromBackendFormat = (backendData: any): NetworkData => {
           setupTime: process.setupTime || 300,
           equipmentCount: process.equipmentCount || 1,
           operatorCount: process.operatorCount || 1,
-          availability: process.availability || 85,
           inputBufferCapacity: process.inputBufferCapacity || 50,
           outputBufferCapacity: process.outputBufferCapacity || 50,
           defectRate: process.defectRate || 2,

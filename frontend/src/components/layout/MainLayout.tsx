@@ -50,9 +50,17 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
   const drawer = (
     <div>
       <Toolbar>
-        <Typography variant="h6" noWrap component="div">
-          生産シミュレーター
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
+          <img 
+            src="/logo.png" 
+            alt="生産シミュレーター" 
+            style={{ 
+              height: '120px', 
+              width: 'auto',
+              maxWidth: '540px'
+            }} 
+          />
+        </Box>
       </Toolbar>
       <Divider />
       <List>

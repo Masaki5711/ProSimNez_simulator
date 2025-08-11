@@ -7,13 +7,16 @@ export interface Product {
   id: string;
   name: string;
   code: string;
-  type: 'raw_material' | 'component' | 'sub_assembly' | 'finished_product';
+  type: 'raw_material' | 'component' | 'sub_assembly' | 'finished_product' | 'defective_product';
   version: string;
   description?: string;
   unitCost: number;
   leadTime: number; // 調達・製造リードタイム
   supplier?: string;
   storageConditions?: string;
+  isDefective?: boolean; // 不良品かどうか
+  originalProductId?: string; // 元製品ID（不良品の場合）
+  qualityGrade?: string; // 品質グレード
 }
 
 /**
@@ -156,6 +159,9 @@ export interface MaterialInput {
   supplyMethod: 'manual' | 'automated' | 'kanban';
   sourceProcessId?: string; // 材料の供給元工程ID（自動継承の追跡用）
   isAutoInherited?: boolean; // 自動継承された材料かどうか
+  isDefective?: boolean; // 不良品かどうか
+  qualityGrade?: string; // 品質グレード
+  originalProductId?: string; // 元製品ID（不良品の場合）
   
   // 部品ごとのスケジューリング設定
   schedulingMode: 'push' | 'pull' | 'hybrid';
@@ -183,6 +189,7 @@ export interface ProductOutput {
   outputQuantity: number;
   unit: string;
   qualityLevel: string;
+  setupTime: number; // 段取り時間（分）
   packagingSpec?: PackagingSpecification;
 }
 

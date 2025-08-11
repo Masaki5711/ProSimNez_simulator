@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -57,6 +57,10 @@ interface ProcessMaterialDialogProps {
   products: Product[];
   onClose: () => void;
   onSave: (processData: AdvancedProcessData) => void;
+  // 前工程の出力製品を取得するための関数を追加
+  getPrecedingOutputs?: (processId: string) => Product[];
+  // 保管庫かどうかを判定するフラグを追加
+  isStorageProcess?: boolean;
 }
 
 const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
@@ -65,6 +69,8 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
   products,
   onClose,
   onSave,
+  getPrecedingOutputs,
+  isStorageProcess = false,
 }) => {
   const [editingProcess, setEditingProcess] = useState<AdvancedProcessData | null>(null);
   const [newMaterial, setNewMaterial] = useState<Partial<MaterialInput>>({
@@ -73,14 +79,36 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
     timing: 'start',
     supplyMethod: 'manual',
     storageLocation: '',
+    isDefective: false,
+    qualityGrade: 'A',
   });
   const [newOutput, setNewOutput] = useState<Partial<ProductOutput>>({
     outputQuantity: 1,
     unit: '個',
     qualityLevel: 'standard',
+    setupTime: 0,
   });
   const [editingMaterialIndex, setEditingMaterialIndex] = useState<number | null>(null);
   const [editingOutputIndex, setEditingOutputIndex] = useState<number | null>(null);
+
+  // 投入材料の候補を取得
+  const getInputMaterialCandidates = useCallback(() => {
+    if (!processData) return [];
+    
+    if (isStorageProcess) {
+      // 保管庫の場合は全製品を候補に
+      return products;
+    }
+    
+    if (getPrecedingOutputs) {
+      // 前工程の出力製品を候補に
+      const precedingOutputs = getPrecedingOutputs(processData.id);
+      return precedingOutputs;
+    }
+    
+    // デフォルトは原材料と部品のみ
+    return products.filter(p => p.type === 'raw_material' || p.type === 'component');
+  }, [processData, products, isStorageProcess, getPrecedingOutputs]);
 
   useEffect(() => {
     if (processData) {
@@ -112,6 +140,9 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
       },
       storageLocation: newMaterial.storageLocation || '',
       supplyMethod: newMaterial.supplyMethod || 'manual',
+      isDefective: newMaterial.isDefective || false,
+      qualityGrade: newMaterial.qualityGrade || 'A',
+      originalProductId: newMaterial.originalProductId,
       // デフォルトのスケジューリング設定
       schedulingMode: 'push',
       batchSize: 1,
@@ -139,6 +170,8 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
       timing: 'start',
       supplyMethod: 'manual',
       storageLocation: '',
+      isDefective: false,
+      qualityGrade: 'A',
     });
   };
 
@@ -152,6 +185,7 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
       outputQuantity: newOutput.outputQuantity || 1,
       unit: newOutput.unit || '個',
       qualityLevel: newOutput.qualityLevel || 'standard',
+      setupTime: newOutput.setupTime || 0,
       packagingSpec: newOutput.packagingSpec,
     };
 
@@ -164,6 +198,7 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
       outputQuantity: 1,
       unit: '個',
       qualityLevel: 'standard',
+      setupTime: 0,
     });
   };
 
@@ -179,6 +214,9 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
       timing: material.timing,
       supplyMethod: material.supplyMethod,
       storageLocation: material.storageLocation,
+      isDefective: material.isDefective,
+      qualityGrade: material.qualityGrade,
+      originalProductId: material.originalProductId,
       // スケジューリング設定も含める
       schedulingMode: material.schedulingMode,
       batchSize: material.batchSize,
@@ -197,6 +235,9 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
       ...updatedMaterials[editingMaterialIndex],
       ...newMaterial,
       materialName: products.find(p => p.id === newMaterial.materialId)?.name || '',
+      isDefective: newMaterial.isDefective,
+      qualityGrade: newMaterial.qualityGrade,
+      originalProductId: newMaterial.originalProductId,
       // スケジューリング設定も含める
       schedulingMode: newMaterial.schedulingMode,
       batchSize: newMaterial.batchSize,
@@ -217,6 +258,8 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
       timing: 'start',
       supplyMethod: 'manual',
       storageLocation: '',
+      isDefective: false,
+      qualityGrade: 'A',
       // デフォルトのスケジューリング設定
       schedulingMode: 'push',
       batchSize: 1,
@@ -325,14 +368,26 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                           value={newMaterial.materialId || ''}
                           onChange={(e) => setNewMaterial({ ...newMaterial, materialId: e.target.value })}
                         >
-                          {products
-                            .filter(p => p.type === 'raw_material' || p.type === 'component')
+                          {getInputMaterialCandidates()
+                            .filter(p => p.type === 'raw_material' || p.type === 'component' || p.type === 'defective_product')
                             .map((product) => (
                             <MenuItem key={product.id} value={product.id}>
                               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                                 <MaterialIcon />
                                 <Typography>{product.name}</Typography>
-                                <Chip label={product.type} size="small" />
+                                <Chip 
+                                  label={product.type} 
+                                  size="small" 
+                                  color={product.isDefective ? 'error' : 'default'}
+                                />
+                                {product.isDefective && (
+                                  <Chip 
+                                    label="不良品" 
+                                    size="small" 
+                                    color="error" 
+                                    variant="outlined"
+                                  />
+                                )}
                               </Box>
                             </MenuItem>
                           ))}
@@ -386,6 +441,52 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                         onChange={(e) => setNewMaterial({ ...newMaterial, storageLocation: e.target.value })}
                         fullWidth
                       />
+
+                      {/* 不良品設定 */}
+                      <Box sx={{ mt: 2, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                        <Typography variant="subtitle2" gutterBottom>
+                          品質・不良品設定
+                        </Typography>
+                        
+                        <FormControlLabel
+                          control={
+                            <Switch
+                              checked={newMaterial.isDefective || false}
+                              onChange={(e) => setNewMaterial({
+                                ...newMaterial,
+                                isDefective: e.target.checked,
+                                qualityGrade: e.target.checked ? 'defective' : 'A'
+                              })}
+                            />
+                          }
+                          label="不良品として扱う"
+                        />
+
+                        {!newMaterial.isDefective && (
+                          <FormControl fullWidth sx={{ mt: 1 }}>
+                            <InputLabel>品質グレード</InputLabel>
+                            <Select
+                              value={newMaterial.qualityGrade || 'A'}
+                              onChange={(e) => setNewMaterial({ ...newMaterial, qualityGrade: e.target.value as any })}
+                            >
+                              <MenuItem value="A">A級（最高品質）</MenuItem>
+                              <MenuItem value="B">B級（標準品質）</MenuItem>
+                              <MenuItem value="C">C級（低品質）</MenuItem>
+                            </Select>
+                          </FormControl>
+                        )}
+
+                        {newMaterial.isDefective && (
+                          <TextField
+                            label="元製品ID（オプション）"
+                            value={newMaterial.originalProductId || ''}
+                            onChange={(e) => setNewMaterial({ ...newMaterial, originalProductId: e.target.value })}
+                            fullWidth
+                            sx={{ mt: 1 }}
+                            helperText="この不良品の元となった製品のIDを入力してください"
+                          />
+                        )}
+                      </Box>
 
                       {/* 部品ごとのスケジューリング設定 */}
                       <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>
@@ -538,6 +639,7 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                           <TableCell align="right">数量</TableCell>
                           <TableCell>タイミング</TableCell>
                           <TableCell>供給方法</TableCell>
+                          <TableCell>品質・不良品</TableCell>
                           <TableCell>スケジューリング</TableCell>
                           <TableCell align="center">アクション</TableCell>
                         </TableRow>
@@ -545,7 +647,7 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                       <TableBody>
                         {editingProcess?.inputMaterials.length === 0 ? (
                           <TableRow>
-                            <TableCell colSpan={6} align="center">
+                            <TableCell colSpan={7} align="center">
                               <Typography variant="body2" color="textSecondary">
                                 材料が設定されていません
                               </Typography>
@@ -583,6 +685,30 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                                     {material.supplyMethod === 'automated' && '自動'}
                                     {material.supplyMethod === 'kanban' && 'かんばん'}
                                   </Typography>
+                                </Box>
+                              </TableCell>
+                              <TableCell>
+                                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                                  {material.isDefective ? (
+                                    <Chip 
+                                      label="不良品" 
+                                      size="small" 
+                                      color="error" 
+                                      variant="outlined"
+                                    />
+                                  ) : (
+                                    <Chip 
+                                      label={`${material.qualityGrade || 'A'}級`} 
+                                      size="small" 
+                                      color="success" 
+                                      variant="outlined"
+                                    />
+                                  )}
+                                  {material.originalProductId && (
+                                    <Typography variant="caption" color="textSecondary">
+                                      元製品: {material.originalProductId}
+                                    </Typography>
+                                  )}
                                 </Box>
                               </TableCell>
                               <TableCell>
@@ -688,6 +814,16 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                           onChange={(e) => setNewOutput({ ...newOutput, qualityLevel: e.target.value })}
                         />
                       </Box>
+                      
+                      <TextField
+                        label="段取り時間（分）"
+                        type="number"
+                        value={newOutput.setupTime || ''}
+                        onChange={(e) => setNewOutput({ ...newOutput, setupTime: Number(e.target.value) })}
+                        inputProps={{ min: 0, step: 1 }}
+                        helperText="この製品を製造する際の段取り時間を設定してください"
+                        fullWidth
+                      />
 
                       <Button
                         startIcon={<AddIcon />}
@@ -713,13 +849,14 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                           <TableCell>製品名</TableCell>
                           <TableCell align="right">数量</TableCell>
                           <TableCell>品質レベル</TableCell>
+                          <TableCell align="right">段取り時間</TableCell>
                           <TableCell align="center">アクション</TableCell>
                         </TableRow>
                       </TableHead>
                       <TableBody>
                         {editingProcess?.outputProducts.length === 0 ? (
                           <TableRow>
-                            <TableCell colSpan={4} align="center">
+                            <TableCell colSpan={5} align="center">
                               <Typography variant="body2" color="textSecondary">
                                 出力製品が設定されていません
                               </Typography>
@@ -741,6 +878,14 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                               </TableCell>
                               <TableCell>
                                 <Chip label={output.qualityLevel} size="small" />
+                              </TableCell>
+                              <TableCell align="right">
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                  <TimingIcon fontSize="small" />
+                                  <Typography variant="body2">
+                                    {output.setupTime}分
+                                  </Typography>
+                                </Box>
                               </TableCell>
                               <TableCell align="center">
                                 <Tooltip title="削除">
