@@ -107,7 +107,7 @@ export interface AdvancedProcessData {
   // 基本情報（既存）
   id: string;
   label: string;
-  type: 'machining' | 'assembly' | 'inspection' | 'storage' | 'shipping' | 'kitting';
+  type: 'machining' | 'assembly' | 'inspection' | 'storage' | 'shipping' | 'kitting' | 'store';
   
   // 処理能力
   cycleTime: number;

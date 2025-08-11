@@ -2,9 +2,10 @@
 
 export interface ProcessNodeData {
   // 基本情報
+  id?: string;                 // ノードID
   label: string;               // 表示名
   name?: string;               // バックエンド用の名前
-  type: 'machining' | 'assembly' | 'inspection' | 'storage' | 'shipping';
+  type: 'machining' | 'assembly' | 'inspection' | 'storage' | 'shipping' | 'store';
   
   // IE指標
   cycleTime: number;            // サイクルタイム（秒）
@@ -34,6 +35,36 @@ export interface ProcessNodeData {
   status?: 'idle' | 'running' | 'blocked' | 'breakdown';
   currentWIP?: number;         // 現在の仕掛品数
   utilization?: number;        // 稼働率
+
+  // ストア固有の設定
+  storeType?: 'finished_product' | 'component'; // ストアの種類
+  productionSchedule?: ProductionScheduleItem[]; // 生産計画
+  inventoryLevels?: InventoryLevel[]; // 在庫レベル
+}
+
+// ストア用の生産計画アイテム
+export interface ProductionScheduleItem {
+  id: string;
+  productId: string;
+  productName: string;
+  quantity: number;
+  unit: string;
+  priority: number;
+  sequence: number; // 製造順序
+  startTime?: string; // 開始時刻（HH:MM形式）
+  endTime?: string;   // 終了時刻（HH:MM形式）
+  isActive: boolean;
+}
+
+// ストア用の在庫レベル
+export interface InventoryLevel {
+  productId: string;
+  productName: string;
+  currentStock: number;
+  minStock: number;
+  maxStock: number;
+  unit: string;
+  reorderPoint: number;
 }
 
 // 頻度作業の定義
@@ -60,6 +91,43 @@ export interface ConnectionData {
   
   // 制約
   maxCapacity?: number;        // 最大搬送能力（個/時間）
+
+  // 複数搬送手段の管理
+  transportMethods?: TransportMethod[];
+}
+
+// 搬送手段の定義
+export interface TransportMethod {
+  id: string;                    // 一意ID
+  name: string;                  // 搬送手段名
+  type: 'conveyor' | 'agv' | 'manual' | 'forklift' | 'tugger' | 'crane';
+  transportTime: number;         // 搬送時間（秒）
+  transportCost: number;         // 搬送コスト（回あたり）
+  maxCapacity: number;           // 最大搬送能力（個/時間）
+  priority: number;              // 優先度（1が最高）
+  isActive: boolean;             // 有効/無効
+  
+  // 搬送キャパシティ（一度に搬送できる総ロット数）
+  transportCapacity: number;
+  
+  // 搬送指示の設定
+  transportInstruction: {
+    type: 'process' | 'push' | 'pull' | 'kanban';  // 搬送指示の種類
+    frequency?: number;          // 搬送頻度（分間隔、type=processの場合）
+    schedule?: string[];         // 搬送時刻（HH:MM形式、type=processの場合）
+  };
+  
+  // 搬送部品の設定
+  transportProducts: TransportProduct[];
+}
+
+// 搬送部品の定義
+export interface TransportProduct {
+  id: string;                    // 一意ID
+  productId: string;             // 製品ID
+  productName: string;           // 製品名
+  lotSize: number;               // ロットサイズ（1ロットあたりの個数）
+  priority: number;              // 優先度（1が最高）
 }
 
 export interface LayoutMetrics {

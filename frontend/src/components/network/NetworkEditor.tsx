@@ -44,6 +44,7 @@ import {
   Edit,
   Settings,
   Inventory,
+  Store as StoreIcon,
 } from '@mui/icons-material';
 
 import ProcessEditDialog from './ProcessEditDialog';
@@ -54,7 +55,9 @@ import IEAnalysisPanel from './IEAnalysisPanel';
 import NetworkValidationPanel from './NetworkValidationPanel';
 import BOMManager from '../production/BOMManager';
 import ProcessNode from './ProcessNode';
+import StoreNode from './StoreNode';
 import TransportEdge from './TransportEdge';
+import StoreEditDialog from './StoreEditDialog';
 
 import { networkEditorApi as importedNetworkEditorApi } from '../../api/networkEditorApi';
 import { simulationApi as importedSimulationApi } from '../../api/simulationApi';
@@ -80,7 +83,7 @@ const networkEditorApi: NetworkEditorApiType = importedNetworkEditorApi;
 const simulationApi: SimulationApiType = importedSimulationApi;
 
 // nodeTypesとedgeTypesをコンポーネントの外に移動
-const nodeTypes = { process: ProcessNode };
+const nodeTypes = { process: ProcessNode, store: StoreNode };
 const edgeTypes = { transport: TransportEdge };
 const defaultEdgeOptions = {
   markerEnd: { type: MarkerType.ArrowClosed },
@@ -129,6 +132,8 @@ const NetworkEditor = () => {
   const [selectedOutputIds, setSelectedOutputIds] = useState<string[]>([]);
   const [materialDialogOpen, setMaterialDialogOpen] = useState(false);
   const [selectedProcessForMaterial, setSelectedProcessForMaterial] = useState<AdvancedProcessData | null>(null);
+  const [storeEditDialogOpen, setStoreEditDialogOpen] = useState(false);
+  const [selectedStoreNode, setSelectedStoreNode] = useState<Node<ProcessNodeData> | null>(null);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const [contextMenuNode, setContextMenuNode] = useState<Node<ProcessNodeData> | null>(null);
@@ -255,6 +260,21 @@ const NetworkEditor = () => {
     };
   }, []);
 
+  // ストアノードの保存ハンドラー
+  const handleStoreSave = useCallback((updatedNodeData: ProcessNodeData) => {
+    if (!selectedStoreNode) return;
+    
+    const updatedNodes = nodes.map(node => 
+      node.id === selectedStoreNode.id 
+        ? { ...node, data: updatedNodeData }
+        : node
+    );
+    
+    setNodes(updatedNodes);
+    setStoreEditDialogOpen(false);
+    setSelectedStoreNode(null);
+  }, [selectedStoreNode, nodes, setNodes]);
+
   // 工程ノードの設定ボタンクリックイベントをリッスン
   useEffect(() => {
     const handleProcessNodeSettings = (event: CustomEvent) => {
@@ -310,12 +330,28 @@ const NetworkEditor = () => {
       setMaterialDialogOpen(true);
     };
 
+    // ストアノードの設定ボタンクリックイベントをリッスン
+    const handleStoreNodeSettings = (event: CustomEvent) => {
+      console.log('NetworkEditor: storeNodeSettings event received:', event.detail);
+      const { nodeId, nodeData } = event.detail;
+      const node = nodes.find(n => n.id === nodeId);
+      if (node) {
+        console.log('NetworkEditor: Found store node, opening dialog:', node);
+        setSelectedStoreNode(node);
+        setStoreEditDialogOpen(true);
+      } else {
+        console.log('NetworkEditor: Store node not found for id:', nodeId);
+      }
+    };
+
     window.addEventListener('processNodeSettings', handleProcessNodeSettings as EventListener);
     window.addEventListener('openMaterialDialog', handleOpenMaterialDialog as EventListener);
+    window.addEventListener('storeNodeSettings', handleStoreNodeSettings as EventListener);
     
     return () => {
       window.removeEventListener('processNodeSettings', handleProcessNodeSettings as EventListener);
       window.removeEventListener('openMaterialDialog', handleOpenMaterialDialog as EventListener);
+      window.removeEventListener('storeNodeSettings', handleStoreNodeSettings as EventListener);
     };
   }, [nodes, processAdvancedData]);
 
@@ -328,8 +364,13 @@ const NetworkEditor = () => {
 
   // ノードのダブルクリックで編集
   const onNodeDoubleClick = useCallback((event: React.MouseEvent, node: Node<ProcessNodeData>) => {
-    setSelectedNode(node);
-    setProcessEditDialogOpen(true);
+    if (node.data.type === 'store') {
+      setSelectedStoreNode(node);
+      setStoreEditDialogOpen(true);
+    } else {
+      setSelectedNode(node);
+      setProcessEditDialogOpen(true);
+    }
   }, []);
 
   // ノードの右クリックでコンテキストメニューを表示
@@ -418,6 +459,12 @@ const NetworkEditor = () => {
           setSelectedProcessForMaterial(newMaterialData);
         }
         setMaterialDialogOpen(true);
+        break;
+      case 'store_edit':
+        if (contextMenuNode.data.type === 'store') {
+          setSelectedStoreNode(contextMenuNode);
+          setStoreEditDialogOpen(true);
+        }
         break;
     }
     
@@ -1262,6 +1309,24 @@ const NetworkEditor = () => {
         inputs: ['STORED_PRODUCT'],
         outputs: [],
       },
+      store: {
+        label: 'ストア',
+        type: 'store',
+        equipmentCount: 0,
+        operatorCount: 0,
+        cycleTime: 5,
+        setupTime: 0,
+        inputBufferCapacity: 1000,
+        outputBufferCapacity: 1000,
+        defectRate: 0,
+        reworkRate: 0,
+        operatingCost: 10,
+        inputs: [],
+        outputs: [],
+        storeType: 'component',
+        productionSchedule: [],
+        inventoryLevels: [],
+      },
     };
 
     return templates[type] || {
@@ -1288,6 +1353,7 @@ const NetworkEditor = () => {
     { icon: <InspectionIcon />, name: '検査', type: 'inspection' },
     { icon: <StorageIcon />, name: '保管', type: 'storage' },
     { icon: <ShippingIcon />, name: '出荷', type: 'shipping' },
+    { icon: <StoreIcon />, name: 'ストア', type: 'store' },
   ];
 
   const handleSave = async () => {
@@ -2001,6 +2067,11 @@ const NetworkEditor = () => {
                 nodes.find(n => n.id === selectedEdge.target)?.position :
                 undefined
             }
+            sourceNodeData={
+              selectedEdge ? 
+                nodes.find(n => n.id === selectedEdge.source)?.data :
+                undefined
+            }
           />
 
           {/* 出力製品選択ダイアログ */}
@@ -2242,6 +2313,17 @@ const NetworkEditor = () => {
             isStorageProcess={selectedProcessForMaterial ? isStorageProcess(selectedProcessForMaterial.id) : false}
           />
 
+          {/* ストア編集ダイアログ */}
+          <StoreEditDialog
+            open={storeEditDialogOpen}
+            nodeData={selectedStoreNode?.data || null}
+            onClose={() => {
+              setStoreEditDialogOpen(false);
+              setSelectedStoreNode(null);
+            }}
+            onSave={handleStoreSave}
+          />
+
           {/* コンテキストメニュー */}
           {contextMenuOpen && contextMenuPosition && (
             <Box
@@ -2264,6 +2346,14 @@ const NetworkEditor = () => {
                   </ListItemIcon>
                   <ListItemText primary="基本編集" />
                 </ListItem>
+                {contextMenuNode?.data.type === 'store' && (
+                  <ListItem button onClick={() => handleContextMenuAction('store_edit')}>
+                    <ListItemIcon>
+                      <Inventory />
+                    </ListItemIcon>
+                    <ListItemText primary="ストア設定" />
+                  </ListItem>
+                )}
                 <ListItem button onClick={() => handleContextMenuAction('advanced_edit')}>
                   <ListItemIcon>
                     <Settings />

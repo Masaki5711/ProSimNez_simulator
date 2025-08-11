@@ -45,8 +45,16 @@ if errorlevel 1 (
     exit /b 1
 )
 
+REM uuidパッケージとその型定義をインストール
+echo [4.5/5] uuidパッケージをインストールしています...
+call npm install uuid @types/uuid
+if errorlevel 1 (
+    echo 警告: uuidパッケージのインストールに失敗しました
+    echo 手動でインストールしてください: npm install uuid @types/uuid
+)
+
 REM フロントエンドサーバーを起動
-echo フロントエンドサーバーを起動しています...
+echo [5/5] フロントエンドサーバーを起動しています...
 echo.
 echo ========================================
 echo 起動完了！
