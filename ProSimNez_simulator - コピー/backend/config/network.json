@@ -1,0 +1,93 @@
+{
+  "factory": {
+    "processes": {
+      "node_1754472818639": {
+        "id": "node_1754472818639",
+        "name": "保管",
+        "type": "storage",
+        "position": {
+          "x": 496.5347134036564,
+          "y": 185.1206339369778
+        },
+        "equipmentCount": 0,
+        "inputs": [
+          "node_1754472834308"
+        ],
+        "outputs": [
+          "node_1754472829720"
+        ],
+        "cycleTime": 5,
+        "setupTime": 0,
+        "availability": 99,
+        "inputBufferCapacity": 1000,
+        "outputBufferCapacity": 1000,
+        "defectRate": 0,
+        "operatingCost": 10
+      },
+      "node_1754472829720": {
+        "id": "node_1754472829720",
+        "name": "検査",
+        "type": "inspection",
+        "position": {
+          "x": 864.9492353050734,
+          "y": 116.31058189549674
+        },
+        "equipmentCount": 1,
+        "inputs": [
+          "node_1754472818639"
+        ],
+        "outputs": [],
+        "cycleTime": 30,
+        "setupTime": 180,
+        "availability": 95,
+        "inputBufferCapacity": 20,
+        "outputBufferCapacity": 20,
+        "defectRate": 0.5,
+        "operatingCost": 80
+      },
+      "node_1754472834308": {
+        "id": "node_1754472834308",
+        "name": "組立",
+        "type": "assembly",
+        "position": {
+          "x": 50.4451651823145,
+          "y": 163.5719291742247
+        },
+        "equipmentCount": 1,
+        "inputs": [],
+        "outputs": [
+          "node_1754472818639"
+        ],
+        "cycleTime": 120,
+        "setupTime": 600,
+        "availability": 90,
+        "inputBufferCapacity": 30,
+        "outputBufferCapacity": 50,
+        "defectRate": 1,
+        "operatingCost": 150
+      }
+    },
+    "connections": {
+      "edge-node_1754472818639-node_1754472829720": {
+        "id": "edge-node_1754472818639-node_1754472829720",
+        "source": "node_1754472818639",
+        "target": "node_1754472829720",
+        "transportTime": 30,
+        "transportLotSize": 10,
+        "transportCost": 50,
+        "distance": 10,
+        "transportType": "conveyor"
+      },
+      "edge-node_1754472834308-node_1754472818639": {
+        "id": "edge-node_1754472834308-node_1754472818639",
+        "source": "node_1754472834308",
+        "target": "node_1754472818639",
+        "transportTime": 30,
+        "transportLotSize": 10,
+        "transportCost": 50,
+        "distance": 10,
+        "transportType": "conveyor"
+      }
+    }
+  }
+}

@@ -1,0 +1,120 @@
+# シミュレーション設定例
+
+# 製品定義
+products:
+  - id: "PART_A"
+    name: "部品A"
+    type: "component"
+    
+  - id: "PART_B"
+    name: "部品B"
+    type: "component"
+    
+  - id: "SUB_ASSY_1"
+    name: "サブアッシ1"
+    type: "subassembly"
+    bom:
+      - part_id: "PART_A"
+        quantity: 2
+      - part_id: "PART_B"
+        quantity: 1
+        
+  - id: "PRODUCT_X"
+    name: "製品X"
+    type: "finished_product"
+    bom:
+      - part_id: "SUB_ASSY_1"
+        quantity: 1
+      - part_id: "PART_A"
+        quantity: 1
+
+# 工程定義
+processes:
+  - id: "PROC_PART_A"
+    name: "部品A加工"
+    type: "machining"
+    equipments:
+      - id: "EQ_A_1"
+        capacity: 1
+        setup_time: 60
+      - id: "EQ_A_2"
+        capacity: 1
+        setup_time: 60
+    outputs:
+      - product_id: "PART_A"
+        lot_size_min: 10
+        lot_size_standard: 20
+        lot_size_max: 50
+    processing_time:
+      PART_A: 30  # 秒
+      
+  - id: "PROC_PART_B"
+    name: "部品B加工"
+    type: "machining"
+    equipments:
+      - id: "EQ_B_1"
+        capacity: 1
+        setup_time: 90
+    outputs:
+      - product_id: "PART_B"
+        lot_size_min: 5
+        lot_size_standard: 10
+        lot_size_max: 30
+    processing_time:
+      PART_B: 45
+      
+  - id: "PROC_SUB_ASSY"
+    name: "サブアッシ組立"
+    type: "assembly"
+    equipments:
+      - id: "EQ_SUB_1"
+        capacity: 1
+        setup_time: 120
+    inputs:
+      - from_process: "PROC_PART_A"
+        product_id: "PART_A"
+        required_quantity: 2
+      - from_process: "PROC_PART_B"
+        product_id: "PART_B"
+        required_quantity: 1
+    outputs:
+      - product_id: "SUB_ASSY_1"
+        lot_size_min: 5
+        lot_size_standard: 10
+        lot_size_max: 20
+    processing_time:
+      SUB_ASSY_1: 120
+      
+  - id: "PROC_FINAL"
+    name: "最終組立"
+    type: "assembly"
+    equipments:
+      - id: "EQ_FINAL_1"
+        capacity: 1
+        setup_time: 180
+    inputs:
+      - from_process: "PROC_SUB_ASSY"
+        product_id: "SUB_ASSY_1"
+        required_quantity: 1
+      - from_process: "PROC_PART_A"
+        product_id: "PART_A"
+        required_quantity: 1
+    outputs:
+      - product_id: "PRODUCT_X"
+        lot_size_min: 1
+        lot_size_standard: 5
+        lot_size_max: 10
+    processing_time:
+      PRODUCT_X: 180
+
+# シミュレーション設定
+simulation:
+  start_time: "2024-01-01T08:00:00"
+  duration: 28800  # 8時間（秒）
+  warm_up_time: 3600  # 1時間（秒）
+  
+# 生産計画
+production_plan:
+  - product_id: "PRODUCT_X"
+    quantity: 100
+    priority: 1
