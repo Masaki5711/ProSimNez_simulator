@@ -972,7 +972,22 @@ const NetworkEditor = () => {
             }
             
             message += `\n\n📋 材料は自動的に次工程の入力材料に設定されました`;
-            alert(message);
+            
+            // 接続線編集への強制移行を確認
+            const result = window.confirm(
+              message + `\n\n🔗 接続線の詳細設定を行いますか？\n\n` +
+              `• 「OK」：接続線編集ダイアログを開く\n` +
+              `• 「キャンセル」：後で手動で編集`
+            );
+            
+            if (result) {
+              // 接続線編集ダイアログを開く
+              const edge = edges.find(e => e.source === sourceNodeId && e.target === targetNodeId);
+              if (edge) {
+                setSelectedEdge(edge);
+                setConnectionEditDialogOpen(true);
+              }
+            }
           }
         }, 500);
       } else {
@@ -1148,41 +1163,57 @@ const NetworkEditor = () => {
               targetProcessData = newTargetProcessData;
             }
             
-            // 接続完了後、材料設定ダイアログを自動で開く
+            // 接続完了後、接続線編集ダイアログを自動で開く
             setTimeout(() => {
               const result = window.confirm(
                 `🔗 工程接続完了!\n\n` +
                 `${sourceNode?.data.label || '前工程'} → ${targetNode.data.label}\n\n` +
-                `📝 材料設定が必要です。今すぐ設定しますか？\n\n` +
-                `• 「OK」：材料設定ダイアログを開く\n` +
-                `• 「キャンセル」：後で手動で設定`
+                `🔗 接続線の詳細設定を行いますか？\n\n` +
+                `• 「OK」：接続線編集ダイアログを開く\n` +
+                `• 「キャンセル」：後で手動で編集`
               );
               
               if (result) {
-                // 材料設定ダイアログを開く
-                if (targetProcessData) {
-                  setSelectedProcessForMaterial(targetProcessData);
-                  setMaterialDialogOpen(true);
+                // 接続線編集ダイアログを開く
+                const edge = edges.find(e => e.source === params.source && e.target === params.target);
+                if (edge) {
+                  setSelectedEdge(edge);
+                  setConnectionEditDialogOpen(true);
                 }
               } else {
-                alert(
-                  `📋 材料設定の手順\n\n` +
-                  `1. 工程を右クリック → 「材料設定」を選択\n` +
-                  `2. 「投入材料」タブで前工程からの材料を設定\n` +
-                  `3. 「出力製品」タブでこの工程の出力を設定\n` +
-                  `4. 設定完了後、次工程との接続で材料が自動継承されます\n\n` +
-                  `💡 重要なポイント：\n` +
-                  `• 接続元の工程の出力製品のみが、接続先の投入材料候補になります\n` +
-                  `• 複数の出力製品がある場合は、接続時に選択できます\n` +
-                  `• 接続元の出力製品以外のものは投入材料候補に含まれません\n` +
-                  `• 前工程（${sourceNode?.data.label || '前工程'}）の出力製品を設定すると、\n` +
-                  `  次工程（${targetNode.data.label}）の投入材料として自動設定されます\n` +
-                  `• 不良率が設定されている工程では、良品・不良品の選択も可能です\n\n` +
-                  `⚠️ 品質選択について：\n` +
-                  `• 不良率設定工程からの接続時は、品質選択ダイアログが表示されます\n` +
-                  `• 「良品のみ」「不良品のみ」「両方（不良率に基づく）」から選択できます\n` +
-                  `• 選択された品質に基づいて、投入材料の品質情報が設定されます`
+                // 材料設定の案内も表示
+                const materialResult = window.confirm(
+                  `📝 材料設定も必要です。今すぐ設定しますか？\n\n` +
+                  `• 「OK」：材料設定ダイアログを開く\n` +
+                  `• 「キャンセル」：後で手動で設定`
                 );
+                
+                if (materialResult) {
+                  // 材料設定ダイアログを開く
+                  if (targetProcessData) {
+                    setSelectedProcessForMaterial(targetProcessData);
+                    setMaterialDialogOpen(true);
+                  }
+                } else {
+                  alert(
+                    `📋 材料設定の手順\n\n` +
+                    `1. 工程を右クリック → 「材料設定」を選択\n` +
+                    `2. 「投入材料」タブで前工程からの材料を設定\n` +
+                    `3. 「出力製品」タブでこの工程の出力を設定\n` +
+                    `4. 設定完了後、次工程との接続で材料が自動継承されます\n\n` +
+                    `💡 重要なポイント：\n` +
+                    `• 接続元の工程の出力製品のみが、接続先の投入材料候補になります\n` +
+                    `• 複数の出力製品がある場合は、接続時に選択できます\n` +
+                    `• 接続元の出力製品以外のものは投入材料候補に含まれません\n` +
+                    `• 前工程（${sourceNode?.data.label || '前工程'}）の出力製品を設定すると、\n` +
+                    `  次工程（${targetNode.data.label}）の投入材料として自動設定されます\n` +
+                    `• 不良率が設定されている工程では、良品・不良品の選択も可能です\n\n` +
+                    `⚠️ 品質選択について：\n` +
+                    `• 不良率設定工程からの接続時は、品質選択ダイアログが表示されます\n` +
+                    `• 「良品のみ」「不良品のみ」「両方（不良率に基づく）」から選択できます\n` +
+                    `• 選択された品質に基づいて、投入材料の品質情報が設定されます`
+                  );
+                }
               }
             }, 500);
           }
@@ -2177,6 +2208,11 @@ const NetworkEditor = () => {
                 undefined
             }
             components={components}
+            sourceProcessData={
+              selectedEdge ? 
+                processAdvancedData.get(selectedEdge.source) :
+                undefined
+            }
           />
 
           {/* 出力製品選択ダイアログ */}

@@ -56,8 +56,8 @@ export interface ComponentBOMItem {
   unit: string;
   position?: string;
   isOptional: boolean;
-  effectiveDate: Date;
-  expiryDate?: Date;
+  effectiveDate: string; // ISO文字列として保存
+  expiryDate?: string; // ISO文字列として保存
   alternativeProducts: string[];
   notes: string;
 }
@@ -83,8 +83,8 @@ export interface BOMItem {
   unit: string;            // 単位（個、kg、m等）
   position?: string;       // 取り付け位置
   isOptional: boolean;     // オプション部品かどうか
-  effectiveDate: Date;     // 有効開始日
-  expiryDate?: Date;       // 有効終了日
+  effectiveDate: string;   // 有効開始日（ISO文字列）
+  expiryDate?: string;     // 有効終了日（ISO文字列）
   alternativeProducts?: string[]; // 代替部品ID
   notes?: string;
 }

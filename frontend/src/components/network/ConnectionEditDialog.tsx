@@ -59,6 +59,7 @@ interface ConnectionEditDialogProps {
   targetPosition?: { x: number; y: number };
   sourceNodeData?: any; // 搬送元のノードデータ
   components?: Array<{id: string, name: string, transportLotSize: number}>; // 部品データ
+  sourceProcessData?: any; // 接続元の工程の詳細データ（出力製品情報を含む）
 }
 
 const ConnectionEditDialog: React.FC<ConnectionEditDialogProps> = ({
@@ -72,6 +73,7 @@ const ConnectionEditDialog: React.FC<ConnectionEditDialogProps> = ({
   targetPosition,
   sourceNodeData,
   components = [],
+  sourceProcessData,
 }) => {
   const [editData, setEditData] = useState<ConnectionData>({
     transportTime: 30,
@@ -85,7 +87,13 @@ const ConnectionEditDialog: React.FC<ConnectionEditDialogProps> = ({
 
   // 搬送手段の管理
   const [transportMethods, setTransportMethods] = useState<TransportMethod[]>([]);
-  const [availableProducts, setAvailableProducts] = useState<Array<{id: string, name: string}>>([]);
+  const [availableProducts, setAvailableProducts] = useState<Array<{
+    id: string, 
+    name: string, 
+    isSourceOutput?: boolean,
+    outputQuantity?: number,
+    unit?: string
+  }>>([]);
 
   useEffect(() => {
     console.log('ConnectionEditDialog: Props received', {
@@ -104,16 +112,52 @@ const ConnectionEditDialog: React.FC<ConnectionEditDialogProps> = ({
       }
     }
     
-    // 搬送元の出力製品を設定
-    if (sourceNodeData && sourceNodeData.outputs && sourceNodeData.outputs.length > 0) {
-      // 接続元の出力部品IDから部品名を取得
+    // 搬送部品の設定：接続元の出力製品を優先的に表示
+    if (sourceProcessData && sourceProcessData.outputProducts && sourceProcessData.outputProducts.length > 0) {
+      // 接続元の工程の出力製品を優先的に表示
+      const sourceOutputProducts = sourceProcessData.outputProducts.map((output: any) => {
+        // まず、componentsから該当する部品データを検索
+        const component = components.find(c => c.id === output.productId);
+        if (component) {
+          return {
+            id: component.id,
+            name: component.name,
+            isSourceOutput: true, // 接続元の出力製品であることを示すフラグ
+            outputQuantity: output.outputQuantity,
+            unit: output.unit
+          };
+        }
+        
+        // 部品が見つからない場合は、出力製品の情報を使用
+        return {
+          id: output.productId,
+          name: output.productName || `部品${output.productId}`,
+          isSourceOutput: true,
+          outputQuantity: output.outputQuantity,
+          unit: output.unit
+        };
+      });
+      
+      // その他の利用可能な部品も追加（接続元の出力製品以外）
+      const otherProducts = components
+        .filter(component => !sourceOutputProducts.find((p: any) => p.id === component.id))
+        .map(component => ({
+          id: component.id,
+          name: component.name,
+          isSourceOutput: false
+        }));
+      
+      setAvailableProducts([...sourceOutputProducts, ...otherProducts]);
+    } else if (sourceNodeData && sourceNodeData.outputs && sourceNodeData.outputs.length > 0) {
+      // 従来の方法：接続元の出力部品IDから部品名を取得
       const products = sourceNodeData.outputs.map((productId: string) => {
         // まず、componentsから該当する部品データを検索
         const component = components.find(c => c.id === productId);
         if (component) {
           return {
             id: component.id,
-            name: component.name
+            name: component.name,
+            isSourceOutput: true
           };
         }
         
@@ -165,30 +209,43 @@ const ConnectionEditDialog: React.FC<ConnectionEditDialogProps> = ({
         if (mappedComponent) {
           return {
             id: actualProductId,
-            name: mappedComponent.name
+            name: mappedComponent.name,
+            isSourceOutput: true
           };
         }
         
         return {
           id: actualProductId,
-          name: displayName
+          name: displayName,
+          isSourceOutput: true
         };
       });
-      setAvailableProducts(products);
+      
+      // その他の利用可能な部品も追加
+      const otherProducts = components
+        .filter(component => !products.find((p: any) => p.id === component.id))
+        .map(component => ({
+          id: component.id,
+          name: component.name,
+          isSourceOutput: false
+        }));
+      
+      setAvailableProducts([...products, ...otherProducts]);
     } else if (components && components.length > 0) {
       // 部品データが利用可能な場合は、すべての部品を表示
       const products = components.map(component => ({
         id: component.id,
-        name: component.name
+        name: component.name,
+        isSourceOutput: false
       }));
       setAvailableProducts(products);
     } else {
       // サンプルの利用可能部品を設定（開発用）
       setAvailableProducts([
-        { id: 'prod_steel', name: '鋼材' },
-        { id: 'prod_bolt', name: 'ボルト' },
-        { id: 'prod_bracket', name: 'ブラケット' },
-        { id: 'prod_final', name: '完成品A' },
+        { id: 'prod_steel', name: '鋼材', isSourceOutput: false },
+        { id: 'prod_bolt', name: 'ボルト', isSourceOutput: false },
+        { id: 'prod_bracket', name: 'ブラケット', isSourceOutput: false },
+        { id: 'prod_final', name: '完成品A', isSourceOutput: false },
       ]);
     }
   }, [initialData, open, sourceNodeName, targetNodeName, sourcePosition, targetPosition, sourceNodeData]);
@@ -232,8 +289,9 @@ const ConnectionEditDialog: React.FC<ConnectionEditDialogProps> = ({
     const method = transportMethods.find(m => m.id === methodId);
     if (!method) return;
 
-    // 部品データから搬送ロットサイズを取得
-    const selectedProduct = availableProducts[0];
+    // 接続元の出力製品を優先的に選択
+    const sourceOutputProduct = availableProducts.find(p => p.isSourceOutput);
+    const selectedProduct = sourceOutputProduct || availableProducts[0];
     const componentData = components?.find(c => c.id === selectedProduct?.id);
     const defaultLotSize = componentData?.transportLotSize || 10;
 
@@ -277,10 +335,14 @@ const ConnectionEditDialog: React.FC<ConnectionEditDialogProps> = ({
     const method = transportMethods.find(m => m.id === methodId);
     if (!method) return;
 
+    // 接続元の出力製品を優先的に選択
+    const sourceOutputProduct = availableProducts.find(p => p.isSourceOutput);
+    const selectedProduct = sourceOutputProduct || availableProducts[0];
+
     const newProduct: TransportProduct = {
       id: generateId(),
-      productId: availableProducts[0]?.id || '',
-      productName: availableProducts[0]?.name || '',
+      productId: selectedProduct?.id || '',
+      productName: selectedProduct?.name || '',
       lotSize: 10,
       priority: method.transportProducts.length + 1,
     };
@@ -328,7 +390,12 @@ const ConnectionEditDialog: React.FC<ConnectionEditDialogProps> = ({
     if (method.transportProducts.length === 0) return 0;
     
     // 各搬送部品のロットサイズの合計（ロット数ベース）
-    return method.transportProducts.reduce((total, product) => total + product.lotSize, 0);
+    // これは搬送手段が一度に運べる総個数ではなく、ロット数の合計
+    const totalLotSizes = method.transportProducts.reduce((total, product) => total + product.lotSize, 0);
+    
+    // 搬送キャパシティは、各搬送部品のロットサイズの合計を基準とする
+    // 例：部品A（ロットサイズ10）、部品B（ロットサイズ5）の場合、搬送キャパシティは15ロット
+    return totalLotSizes;
   };
 
   // 搬送可能な部品数の表示
@@ -336,8 +403,11 @@ const ConnectionEditDialog: React.FC<ConnectionEditDialogProps> = ({
     if (method.transportProducts.length === 0) return '搬送部品が設定されていません';
     
     const capacity = method.transportCapacity; // 搬送キャパシティ（ロット数）
+    
+    // 各搬送部品の最大搬送可能数を計算
     const products = method.transportProducts.map(product => {
-      const maxLots = Math.min(capacity, Math.floor(capacity / product.lotSize));
+      // 搬送キャパシティ（ロット数）をその部品のロットサイズで割って、最大搬送可能ロット数を計算
+      const maxLots = Math.floor(capacity / product.lotSize);
       const maxQuantity = maxLots * product.lotSize;
       return `${product.productName}: ${maxLots}ロット(${maxQuantity}個)`;
     });
@@ -913,7 +983,13 @@ const ConnectionEditDialog: React.FC<ConnectionEditDialogProps> = ({
                             搬送キャパシティ: {method.transportCapacity}ロット
                           </Typography>
                           <Typography variant="caption" color="info.dark" sx={{ display: 'block' }}>
-                            総搬送可能個数: {method.transportProducts.reduce((total, product) => total + (product.lotSize * Math.min(method.transportCapacity, Math.floor(method.transportCapacity / product.lotSize))), 0)}個
+                            総搬送可能個数: {method.transportProducts.reduce((total, product) => {
+                              const maxLots = Math.floor(method.transportCapacity / product.lotSize);
+                              return total + (maxLots * product.lotSize);
+                            }, 0)}個
+                          </Typography>
+                          <Typography variant="caption" color="info.dark" sx={{ display: 'block', mt: 1 }}>
+                            💡 搬送キャパシティは各搬送部品のロットサイズの合計で設定されます
                           </Typography>
                         </Box>
                       </Grid>
@@ -921,19 +997,46 @@ const ConnectionEditDialog: React.FC<ConnectionEditDialogProps> = ({
                       {/* 部品ロットの管理 */}
                       <Grid item xs={12}>
                         <Box sx={{ mt: 2, p: 2, backgroundColor: 'grey.50', borderRadius: 1 }}>
-                                                     <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
-                             <Typography variant="subtitle2" color="primary">
-                               <ProductIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
-                               搬送部品設定
-                             </Typography>
-                             <Button
-                               variant="outlined"
-                               size="small"
-                               startIcon={<AddIcon />}
-                               onClick={() => addProductLot(method.id)}
-                             >
-                               搬送部品追加
-                             </Button>
+                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+                            <Typography variant="subtitle2" color="primary">
+                              <ProductIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
+                              搬送部品設定
+                            </Typography>
+                            <Button
+                              variant="outlined"
+                              size="small"
+                              startIcon={<AddIcon />}
+                              onClick={() => addProductLot(method.id)}
+                            >
+                              搬送部品追加
+                            </Button>
+                          </Box>
+                          
+                                                     {/* 接続元の出力製品に関する説明 */}
+                           {availableProducts.some(p => p.isSourceOutput) && (
+                             <Box sx={{ mb: 2, p: 1.5, backgroundColor: 'success.light', borderRadius: 1, border: '1px solid', borderColor: 'success.main' }}>
+                               <Typography variant="caption" color="success.dark" sx={{ display: 'block', fontWeight: 'bold' }}>
+                                 🎯 接続元の出力製品が優先表示されています
+                               </Typography>
+                               <Typography variant="caption" color="success.dark">
+                                 • 🎯マークの部品は接続元の工程から出力される製品です
+                                 • 複数の出力製品がある場合は、それぞれを搬送部品として設定できます
+                                 • 接続元の出力製品以外の部品も選択可能です
+                               </Typography>
+                             </Box>
+                           )}
+                           
+                           {/* 搬送部品設定の説明 */}
+                           <Box sx={{ mb: 2, p: 1.5, backgroundColor: 'info.light', borderRadius: 1, border: '1px solid', borderColor: 'info.main' }}>
+                             <Typography variant="caption" color="info.dark" sx={{ display: 'block', fontWeight: 'bold' }}>
+                                 📦 搬送部品設定の仕組み
+                               </Typography>
+                               <Typography variant="caption" color="info.dark">
+                                 • <strong>ロットサイズ</strong>: 1ロットあたりの個数（例：10個/ロット）
+                                 • <strong>搬送キャパシティ</strong>: 搬送手段が一度に運べるロット数
+                                 • <strong>搬送可能個数</strong>: ロットサイズ × 搬送キャパシティ
+                                 • 例：搬送キャパシティ10ロット、ロットサイズ10個の場合、100個運べます
+                               </Typography>
                            </Box>
                           
                                                      {method.transportProducts.length === 0 ? (
@@ -963,11 +1066,39 @@ const ConnectionEditDialog: React.FC<ConnectionEditDialogProps> = ({
                                             }}
                                             displayEmpty
                                           >
-                                            {availableProducts.map((product) => (
-                                              <MenuItem key={product.id} value={product.id}>
-                                                {product.name}
+                                            {/* 接続元の出力製品を優先的に表示 */}
+                                            {availableProducts
+                                              .filter(product => product.isSourceOutput)
+                                              .map((product) => (
+                                                <MenuItem 
+                                                  key={product.id} 
+                                                  value={product.id}
+                                                  sx={{ 
+                                                    backgroundColor: 'success.light',
+                                                    '&:hover': { backgroundColor: 'success.main', color: 'white' }
+                                                  }}
+                                                >
+                                                  🎯 {product.name} (接続元出力)
+                                                  {product.outputQuantity && product.unit && 
+                                                    ` - ${product.outputQuantity}${product.unit}`
+                                                  }
+                                                </MenuItem>
+                                              ))}
+                                            {/* 区切り線 */}
+                                            {availableProducts.some(p => p.isSourceOutput) && 
+                                             availableProducts.some(p => !p.isSourceOutput) && (
+                                              <MenuItem disabled sx={{ borderTop: '1px solid #ccc' }}>
+                                                ──────────────────────────
                                               </MenuItem>
-                                            ))}
+                                            )}
+                                            {/* その他の部品 */}
+                                            {availableProducts
+                                              .filter(product => !product.isSourceOutput)
+                                              .map((product) => (
+                                                <MenuItem key={product.id} value={product.id}>
+                                                  {product.name}
+                                                </MenuItem>
+                                              ))}
                                           </Select>
                                         </FormControl>
                                         <TextField

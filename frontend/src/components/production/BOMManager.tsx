@@ -137,7 +137,7 @@ const BOMManager: React.FC<BOMManagerProps> = ({
   const handleLegacyBOMSave = () => {
     const newBomItem: BOMItem = {
       id: `bom_${Date.now()}`,
-      effectiveDate: new Date(),
+      effectiveDate: new Date().toISOString(),
       isOptional: false,
       ...editingBomItem,
     } as BOMItem;

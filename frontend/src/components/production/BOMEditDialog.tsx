@@ -127,7 +127,7 @@ const BOMEditDialog: React.FC<BOMEditDialogProps> = ({
       quantity: newBOMItem.quantity || 1,
       unit: newBOMItem.unit || '個',
       isOptional: newBOMItem.isOptional || false,
-      effectiveDate: new Date(),
+      effectiveDate: new Date().toISOString(),
       position: newBOMItem.position,
       notes: newBOMItem.notes,
     };

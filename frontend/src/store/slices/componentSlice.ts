@@ -411,7 +411,7 @@ const componentSlice = createSlice({
               unit: bomItem.unit || '個',
               position: bomItem.position || '',
               isOptional: bomItem.isOptional || false,
-              effectiveDate: bomItem.effectiveDate || new Date(),
+              effectiveDate: bomItem.effectiveDate || new Date().toISOString(),
               expiryDate: bomItem.expiryDate,
               alternativeProducts: bomItem.alternativeProducts || [],
               notes: bomItem.notes || '',

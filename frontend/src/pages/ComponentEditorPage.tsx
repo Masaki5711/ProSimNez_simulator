@@ -83,7 +83,15 @@ const ComponentEditorPage: React.FC = () => {
   const [bomDialogOpen, setBomDialogOpen] = useState(false);
   const [editingComponent, setEditingComponent] = useState<Partial<Component>>({});
   const [editingCategory, setEditingCategory] = useState<Partial<ComponentCategory>>({});
-  const [editingBomItem, setEditingBomItem] = useState<Partial<ComponentBOMItem>>({});
+  const [editingBomItem, setEditingBomItem] = useState<Partial<ComponentBOMItem>>({
+    childProductId: '',
+    quantity: 1,
+    unit: '個',
+    isOptional: false,
+    position: '1',
+    notes: '',
+    alternativeProducts: [],
+  });
   const [selectedComponent, setSelectedComponent] = useState<Component | null>(null);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
@@ -91,9 +99,67 @@ const ComponentEditorPage: React.FC = () => {
   // プロジェクトが変更されたときに部品データを再取得
   useEffect(() => {
     if (currentProject?.id) {
+      console.log('プロジェクト変更により部品データを再取得:', currentProject.id);
       dispatch(fetchComponents(currentProject.id));
     }
   }, [currentProject?.id, dispatch]);
+
+  // 部品データが更新されたときに選択中の部品も更新
+  useEffect(() => {
+    if (selectedComponent?.id && components.length > 0) {
+      const updatedComponent = components.find(c => c.id === selectedComponent.id);
+      if (updatedComponent) {
+        // 実際に変更があった場合のみ更新（無限ループを防ぐ）
+        const hasChanges = 
+          updatedComponent.name !== selectedComponent.name ||
+          updatedComponent.code !== selectedComponent.code ||
+          updatedComponent.type !== selectedComponent.type ||
+          updatedComponent.unit !== selectedComponent.unit ||
+          (updatedComponent.bomItems?.length || 0) !== (selectedComponent.bomItems?.length || 0);
+        
+        console.log('選択中部品の更新チェック:', {
+          selectedComponentId: selectedComponent.id,
+          hasChanges,
+          currentBomItemsCount: selectedComponent.bomItems?.length || 0,
+          updatedBomItemsCount: updatedComponent.bomItems?.length || 0,
+          currentBomItems: selectedComponent.bomItems,
+          updatedBomItems: updatedComponent.bomItems
+        });
+        
+        if (hasChanges) {
+          console.log('選択中部品に変更を検出、更新します:', {
+            id: updatedComponent.id,
+            name: updatedComponent.name,
+            bomItemsCount: updatedComponent.bomItems?.length || 0
+          });
+          
+          setSelectedComponent(prev => {
+            const newState = {
+              ...prev,
+              ...updatedComponent,
+              bomItems: updatedComponent.bomItems || []
+            };
+            console.log('選択中部品の状態更新:', {
+              prev: prev,
+              new: newState
+            });
+            return newState;
+          });
+        }
+      }
+    }
+  }, [components, selectedComponent?.id]); // selectedComponent.idのみを依存関係に含める
+
+  // 部品データの変更を監視（デバッグ用）
+  useEffect(() => {
+    if (components.length > 0) {
+      console.log('部品データが更新されました:', {
+        componentsCount: components.length,
+        selectedComponentId: selectedComponent?.id,
+        selectedComponentBomItemsCount: selectedComponent?.bomItems?.length || 0
+      });
+    }
+  }, [components.length]); // components.lengthのみを依存関係に含める
 
   const handleSaveComponent = () => {
     if (!currentProject?.id) {
@@ -140,14 +206,98 @@ const ComponentEditorPage: React.FC = () => {
 
   const handleSaveBOMItem = () => {
     if (!selectedComponent || !currentProject?.id) return;
+    
+    // 必須フィールドのバリデーション
+    if (!editingBomItem.childProductId || !editingBomItem.quantity) {
+      showSnackbar('部品と数量は必須です');
+      return;
+    }
+    
+    // 自分自身をBOM項目として追加しようとしている場合のチェック
+    if (editingBomItem.childProductId === selectedComponent.id) {
+      showSnackbar('自分自身をBOM項目として追加することはできません');
+      return;
+    }
+    
+    // 既存のBOM項目との重複チェック
+    const existingBOMItem = selectedComponent.bomItems.find(
+      item => item.childProductId === editingBomItem.childProductId
+    );
+    
+    if (existingBOMItem && !editingBomItem.id) {
+      showSnackbar('この部品は既にBOM項目として登録されています');
+      return;
+    }
+    
+    // BOM項目のデータを準備（ISO文字列として保存）
+    const bomItemData: ComponentBOMItem = {
+      id: editingBomItem.id || `bom_${Date.now()}`,
+      parentProductId: selectedComponent.id,
+      childProductId: editingBomItem.childProductId!,
+      quantity: editingBomItem.quantity!,
+      unit: editingBomItem.unit!,
+      effectiveDate: new Date().toISOString(), // ISO文字列として保存
+      position: editingBomItem.position?.toString() || '1',
+      isOptional: editingBomItem.isOptional || false,
+      expiryDate: editingBomItem.expiryDate || undefined,
+      alternativeProducts: editingBomItem.alternativeProducts || [],
+      notes: editingBomItem.notes || '',
+    };
+    
+    console.log('BOM項目保存開始:', { 
+      selectedComponent: selectedComponent.id, 
+      bomItemData, 
+      projectId: currentProject.id 
+    });
+    
+    // ダイアログを閉じてフォームをリセット
+    setBomDialogOpen(false);
+    setEditingBomItem({
+      childProductId: '',
+      quantity: 1,
+      unit: '個',
+      isOptional: false,
+      position: '1',
+      notes: '',
+      alternativeProducts: [],
+    });
+    
     dispatch(saveBOMItem({ 
       componentId: selectedComponent.id, 
-      bomItem: editingBomItem,
+      bomItem: bomItemData,
       projectId: currentProject.id 
-    })).then(() => {
-      setBomDialogOpen(false);
-      setEditingBomItem({});
-      showSnackbar('BOM項目を保存しました');
+    })).then((result) => {
+      console.log('BOM項目保存結果:', result);
+      console.log('保存されたBOM項目の詳細:', result.payload);
+      console.log('現在の選択中部品の状態:', selectedComponent);
+      console.log('現在の全部品データ:', components);
+      
+      // 保存成功後の処理
+      if (result.payload) {
+        // 成功メッセージを表示
+        showSnackbar(editingBomItem.id ? 'BOM項目を更新しました' : 'BOM項目を追加しました');
+        
+        // 部品データを再取得して最新の状態を保つ
+        if (currentProject?.id) {
+          // 少し遅延を入れてReduxの状態が安定してから再取得
+          setTimeout(() => {
+            console.log('部品データ再取得開始');
+            dispatch(fetchComponents(currentProject.id)).then((fetchResult) => {
+              console.log('部品データ再取得完了:', fetchResult);
+              console.log('再取得後の部品データ:', fetchResult.payload);
+            });
+          }, 100);
+        }
+      }
+    }).catch((error) => {
+      console.error('BOM項目保存エラー:', error);
+      showSnackbar('BOM項目の保存に失敗しました');
+      
+      // エラー時はダイアログを再開
+      setBomDialogOpen(true);
+      setEditingBomItem({
+        ...editingBomItem, // 既存の編集データを保持
+      });
     });
   };
 
@@ -164,9 +314,46 @@ const ComponentEditorPage: React.FC = () => {
   };
 
   const handleDeleteBOMItem = (componentId: string, bomItemId: string) => {
-    dispatch(deleteBOMItem({ componentId, bomItemId })).then(() => {
-      showSnackbar('BOM項目を削除しました');
-    });
+    if (!currentProject?.id) {
+      showSnackbar('プロジェクトが選択されていません');
+      return;
+    }
+    
+    // 削除確認
+    const bomItem = components.find(c => c.id === componentId)?.bomItems.find(b => b.id === bomItemId);
+    if (!bomItem) {
+      showSnackbar('削除対象のBOM項目が見つかりません');
+      return;
+    }
+    
+    const childComponent = components.find(c => c.id === bomItem.childProductId);
+    const component = components.find(c => c.id === componentId);
+    
+    if (window.confirm(
+      `以下のBOM項目を削除しますか？\n\n` +
+      `対象部品: ${component?.name} (${component?.code})\n` +
+      `削除項目: ${childComponent?.name || '不明'} (${childComponent?.code || 'N/A'}) × ${bomItem.quantity} ${bomItem.unit}\n\n` +
+      `この操作は取り消せません。`
+    )) {
+      dispatch(deleteBOMItem({ componentId, bomItemId })).then(() => {
+        showSnackbar('BOM項目を削除しました');
+        
+        // 部品データを再取得して最新の状態を保つ
+        if (currentProject?.id) {
+          // 少し遅延を入れてReduxの状態が安定してから再取得
+          setTimeout(() => {
+            console.log('削除後の部品データ再取得開始');
+            dispatch(fetchComponents(currentProject.id)).then((fetchResult) => {
+              console.log('削除後の部品データ再取得完了:', fetchResult);
+              console.log('削除後の部品データ:', fetchResult.payload);
+            });
+          }, 100);
+        }
+      }).catch((error) => {
+        console.error('BOM項目削除エラー:', error);
+        showSnackbar('BOM項目の削除に失敗しました');
+      });
+    }
   };
 
   const getCategoryName = (categoryId: string) => {
@@ -462,85 +649,263 @@ const ComponentEditorPage: React.FC = () => {
               BOM構成管理
             </Typography>
             <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
-              部品一覧から部品を選択してBOM構成を編集してください
+              部品を選択してBOM構成を作成・編集してください
             </Typography>
 
-            {components.map((component) => (
-              <Accordion key={component.id} sx={{ mb: 1 }}>
-                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', width: '100%' }}>
-                    <Typography variant="h6" sx={{ flexGrow: 1 }}>
-                      {component.name} ({component.code})
-                    </Typography>
-                    <Button
-                      size="small"
-                      startIcon={<AddIcon />}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedComponent(component);
-                        setEditingBomItem({});
-                        setBomDialogOpen(true);
+            {components.length === 0 ? (
+              <Alert severity="info" sx={{ mb: 2 }}>
+                部品が登録されていません。まず「部品一覧」タブで部品を追加してください。
+              </Alert>
+            ) : (
+              <Box>
+                {/* 部品選択セクション */}
+                <Paper sx={{ p: 2, mb: 3 }}>
+                  <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 'bold' }}>
+                    対象部品の選択
+                  </Typography>
+                  <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+                    構成を作成・編集したい部品を選択してください
+                  </Typography>
+                  
+                  <FormControl fullWidth sx={{ mb: 2 }}>
+                    <InputLabel>部品を選択</InputLabel>
+                    <Select
+                      value={selectedComponent?.id || ''}
+                      onChange={(e) => {
+                        const component = components.find(c => c.id === e.target.value);
+                        setSelectedComponent(component || null);
                       }}
+                      displayEmpty
                     >
-                      BOM追加
-                    </Button>
-                  </Box>
-                </AccordionSummary>
-                <AccordionDetails>
-                  {component.bomItems.length > 0 ? (
-                    <TableContainer>
-                      <Table size="small">
-                        <TableHead>
-                          <TableRow>
-                            <TableCell>部品名</TableCell>
-                            <TableCell>数量</TableCell>
-                            <TableCell>単位</TableCell>
-                            <TableCell>備考</TableCell>
-                            <TableCell>操作</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                                                     {component.bomItems.map((bomItem) => {
-                             const bomComponent = components.find(c => c.id === bomItem.childProductId);
-                             return (
-                               <TableRow key={bomItem.id}>
-                                 <TableCell>{bomComponent?.name || '不明'}</TableCell>
-                                 <TableCell>{bomItem.quantity}</TableCell>
-                                 <TableCell>{bomItem.unit}</TableCell>
-                                 <TableCell>{bomItem.notes || ''}</TableCell>
-                                <TableCell>
-                                                                     <IconButton
-                                     size="small"
-                                     onClick={() => {
-                                       setSelectedComponent(component);
-                                       setEditingBomItem(bomItem);
-                                       setBomDialogOpen(true);
-                                     }}
-                                   >
-                                     <EditIcon />
-                                   </IconButton>
-                                  <IconButton
-                                    size="small"
-                                    color="error"
-                                    onClick={() => handleDeleteBOMItem(component.id, bomItem.id)}
-                                  >
-                                    <DeleteIcon />
-                                  </IconButton>
-                                </TableCell>
-                              </TableRow>
-                            );
-                          })}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
-                  ) : (
-                    <Typography variant="body2" color="textSecondary" sx={{ textAlign: 'center', py: 2 }}>
-                      BOM項目がありません
-                    </Typography>
+                      <MenuItem value="" disabled>
+                        <em>部品を選択してください</em>
+                      </MenuItem>
+                      {components.map((component) => (
+                        <MenuItem key={component.id} value={component.id}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <InventoryIcon fontSize="small" />
+                            <Typography variant="body2">
+                              {component.name} ({component.code})
+                            </Typography>
+                            <Chip label={component.type} size="small" color="secondary" />
+                          </Box>
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+
+                  {selectedComponent && (
+                    <Box sx={{ p: 2, backgroundColor: 'primary.light', borderRadius: 1, color: 'white' }}>
+                      <Typography variant="subtitle2" gutterBottom sx={{ fontWeight: 'bold' }}>
+                        📋 選択された部品: {selectedComponent.name} ({selectedComponent.code})
+                      </Typography>
+                      <Grid container spacing={2}>
+                        <Grid item xs={6}>
+                          <Typography variant="body2">
+                            <strong>タイプ:</strong> {selectedComponent.type}
+                          </Typography>
+                        </Grid>
+                        <Grid item xs={6}>
+                          <Typography variant="body2">
+                            <strong>単価:</strong> ¥{selectedComponent.unitCost.toLocaleString()}
+                          </Typography>
+                        </Grid>
+                        <Grid item xs={6}>
+                          <Typography variant="body2">
+                            <strong>単位:</strong> {selectedComponent.unit}
+                          </Typography>
+                        </Grid>
+                        <Grid item xs={6}>
+                          <Typography variant="body2">
+                            <strong>BOM項目数:</strong> {selectedComponent.bomItems.length}項目
+                          </Typography>
+                        </Grid>
+                      </Grid>
+                    </Box>
                   )}
-                </AccordionDetails>
-              </Accordion>
-            ))}
+                </Paper>
+
+                {/* BOM構成管理セクション */}
+                {selectedComponent && (
+                  <Paper sx={{ p: 2 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                      <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
+                        BOM構成: {selectedComponent.name}
+                      </Typography>
+                      <Button
+                        variant="contained"
+                        startIcon={<AddIcon />}
+                        onClick={() => {
+                          setEditingBomItem({
+                            childProductId: '',
+                            quantity: 1,
+                            unit: selectedComponent.unit || '個',
+                            isOptional: false,
+                            position: (selectedComponent.bomItems.length + 1).toString(),
+                            notes: '',
+                            alternativeProducts: [],
+                          });
+                          setBomDialogOpen(true);
+                        }}
+                        disabled={!currentProject?.id}
+                        title={!currentProject?.id ? 'プロジェクトを選択してください' : ''}
+                      >
+                        BOM項目追加
+                      </Button>
+                    </Box>
+
+                    {/* デバッグ情報 */}
+                    <Box sx={{ mb: 2, p: 1, backgroundColor: 'grey.100', borderRadius: 1 }}>
+                      <Typography variant="caption" color="textSecondary">
+                        デバッグ情報: BOM項目数: {selectedComponent.bomItems?.length || 0} | 
+                        部品ID: {selectedComponent.id} | 
+                        最終更新: {new Date().toLocaleTimeString()} | 
+                        全部品数: {components.length}
+                      </Typography>
+                      {selectedComponent.bomItems && selectedComponent.bomItems.length > 0 && (
+                        <Box sx={{ mt: 1 }}>
+                          <Typography variant="caption" color="textSecondary">
+                            登録済みBOM項目: {selectedComponent.bomItems.map(item => 
+                              `${item.childProductId}(${item.quantity}${item.unit})`
+                            ).join(', ')}
+                          </Typography>
+                        </Box>
+                      )}
+                      <Box sx={{ mt: 1 }}>
+                        <Typography variant="caption" color="textSecondary">
+                          選択中部品の詳細: {JSON.stringify({
+                            id: selectedComponent.id,
+                            name: selectedComponent.name,
+                            bomItemsCount: selectedComponent.bomItems?.length || 0,
+                            bomItems: selectedComponent.bomItems
+                          }, null, 2)}
+                        </Typography>
+                      </Box>
+                    </Box>
+
+                    {selectedComponent.bomItems && selectedComponent.bomItems.length > 0 ? (
+                      <TableContainer>
+                        <Table size="small">
+                          <TableHead>
+                            <TableRow>
+                              <TableCell>部品名</TableCell>
+                              <TableCell>コード</TableCell>
+                              <TableCell>タイプ</TableCell>
+                              <TableCell align="right">数量</TableCell>
+                              <TableCell>単位</TableCell>
+                              <TableCell>位置</TableCell>
+                              <TableCell>オプション</TableCell>
+                              <TableCell>備考</TableCell>
+                              <TableCell align="center">操作</TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {selectedComponent.bomItems.map((bomItem) => {
+                              const bomComponent = components.find(c => c.id === bomItem.childProductId);
+                              console.log('BOM項目表示:', { bomItem, bomComponent });
+                              return (
+                                <TableRow key={`${selectedComponent.id}-${bomItem.id}`} hover>
+                                  <TableCell>
+                                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                                      <InventoryIcon sx={{ mr: 1, fontSize: 'small', color: 'action.active' }} />
+                                      <Typography variant="body2" fontWeight="medium">
+                                        {bomComponent?.name || `不明 (ID: ${bomItem.childProductId || 'undefined'})`}
+                                      </Typography>
+                                    </Box>
+                                  </TableCell>
+                                  <TableCell>
+                                    <Chip 
+                                      label={bomComponent?.code || `N/A (ID: ${bomItem.childProductId || 'undefined'})`} 
+                                      size="small" 
+                                      variant="outlined"
+                                    />
+                                  </TableCell>
+                                  <TableCell>
+                                    <Chip 
+                                      label={bomComponent?.type || 'N/A'} 
+                                      size="small" 
+                                      color="secondary"
+                                    />
+                                  </TableCell>
+                                  <TableCell align="right">
+                                    <Typography variant="body2" fontWeight="medium">
+                                      {bomItem.quantity || '-'}
+                                    </Typography>
+                                  </TableCell>
+                                  <TableCell>{bomItem.unit || '-'}</TableCell>
+                                  <TableCell>{bomItem.position || '-'}</TableCell>
+                                  <TableCell>
+                                    {bomItem.isOptional ? (
+                                      <Chip label="オプション" size="small" color="warning" />
+                                    ) : (
+                                      <Chip label="必須" size="small" color="success" />
+                                    )}
+                                  </TableCell>
+                                  <TableCell>
+                                    <Typography variant="body2" color="textSecondary" sx={{ maxWidth: 150 }}>
+                                      {bomItem.notes || '-'}
+                                    </Typography>
+                                  </TableCell>
+                                  <TableCell align="center">
+                                    <Box sx={{ display: 'flex', gap: 0.5 }}>
+                                      <IconButton
+                                        size="small"
+                                        color="primary"
+                                        onClick={() => {
+                                          setEditingBomItem({
+                                            ...bomItem,
+                                            // 既存データをコピー
+                                          });
+                                          setBomDialogOpen(true);
+                                        }}
+                                        title="編集"
+                                      >
+                                        <EditIcon fontSize="small" />
+                                      </IconButton>
+                                      <IconButton
+                                        size="small"
+                                        color="error"
+                                        onClick={() => handleDeleteBOMItem(selectedComponent.id, bomItem.id)}
+                                        title="削除"
+                                      >
+                                        <DeleteIcon fontSize="small" />
+                                      </IconButton>
+                                    </Box>
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+                    ) : (
+                      <Box sx={{ textAlign: 'center', py: 3 }}>
+                        <InventoryIcon sx={{ fontSize: 40, color: 'action.disabled', mb: 1 }} />
+                        <Typography variant="body2" color="textSecondary" gutterBottom>
+                          BOM項目がありません
+                        </Typography>
+                        <Typography variant="caption" color="textSecondary">
+                          この部品の構成部品・材料を追加してください
+                        </Typography>
+                      </Box>
+                    )}
+                  </Paper>
+                )}
+
+                {/* 部品が選択されていない場合の案内 */}
+                {!selectedComponent && (
+                  <Paper sx={{ p: 3, textAlign: 'center' }}>
+                    <InventoryIcon sx={{ fontSize: 60, color: 'action.disabled', mb: 2 }} />
+                    <Typography variant="h6" color="textSecondary" gutterBottom>
+                      部品を選択してください
+                    </Typography>
+                    <Typography variant="body2" color="textSecondary">
+                      上記の部品選択から、BOM構成を作成・編集したい部品を選択してください
+                    </Typography>
+                  </Paper>
+                )}
+              </Box>
+            )}
           </Box>
         )}
       </Paper>
@@ -718,52 +1083,217 @@ const ComponentEditorPage: React.FC = () => {
       </Dialog>
 
       {/* BOM項目編集ダイアログ */}
-      <Dialog open={bomDialogOpen} onClose={() => setBomDialogOpen(false)} maxWidth="sm" fullWidth>
+      <Dialog 
+        open={bomDialogOpen} 
+        onClose={() => {
+          setBomDialogOpen(false);
+          setEditingBomItem({
+            childProductId: '',
+            quantity: 1,
+            unit: '個',
+            isOptional: false,
+            position: '1',
+            notes: '',
+            alternativeProducts: [],
+          });
+        }} 
+        maxWidth="md" 
+        fullWidth
+      >
         <DialogTitle>
-          {editingBomItem.id ? 'BOM項目編集' : 'BOM項目追加'}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <ReceiptIcon color="primary" />
+            <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
+              {editingBomItem.id ? 'BOM項目編集' : 'BOM項目追加'}
+            </Typography>
+          </Box>
+          {selectedComponent && (
+            <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
+              対象部品: {selectedComponent.name} ({selectedComponent.code})
+            </Typography>
+          )}
         </DialogTitle>
         <DialogContent>
-                     <FormControl fullWidth margin="normal">
-             <InputLabel>部品</InputLabel>
-             <Select
-               value={editingBomItem.childProductId || ''}
-                              onChange={(e) => setEditingBomItem(prev => ({ ...prev, childProductId: e.target.value }))}
-             >
-               {components.map((component) => (
-                 <MenuItem key={component.id} value={component.id}>
-                   {component.name} ({component.code})
-                 </MenuItem>
-               ))}
-             </Select>
-           </FormControl>
-          <TextField
-            fullWidth
-            label="数量"
-            type="number"
-            value={editingBomItem.quantity || ''}
-                         onChange={(e) => setEditingBomItem(prev => ({ ...prev, quantity: Number(e.target.value) }))}
-            margin="normal"
-          />
-          <TextField
-            fullWidth
-            label="単位"
-            value={editingBomItem.unit || ''}
-                         onChange={(e) => setEditingBomItem(prev => ({ ...prev, unit: e.target.value }))}
-            margin="normal"
-          />
-          <TextField
-            fullWidth
-            label="備考"
-            multiline
-            rows={2}
-            value={editingBomItem.notes || ''}
-                         onChange={(e) => setEditingBomItem(prev => ({ ...prev, notes: e.target.value }))}
-            margin="normal"
-          />
+          <Grid container spacing={2} sx={{ mt: 1 }}>
+            <Grid item xs={12} sm={6}>
+              <FormControl fullWidth margin="normal" required>
+                <InputLabel>部品・材料</InputLabel>
+                <Select
+                  value={editingBomItem.childProductId || ''}
+                  onChange={(e) => setEditingBomItem(prev => ({ ...prev, childProductId: e.target.value }))}
+                  error={!editingBomItem.childProductId}
+                >
+                  {components
+                    .filter(c => c.id !== selectedComponent?.id) // 自分自身を除外
+                    .map((component) => (
+                      <MenuItem key={component.id} value={component.id}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <InventoryIcon fontSize="small" />
+                          <Typography>{component.name}</Typography>
+                          <Chip label={component.code} size="small" variant="outlined" />
+                          <Chip label={component.type} size="small" color="secondary" />
+                        </Box>
+                      </MenuItem>
+                    ))}
+                </Select>
+                {!editingBomItem.childProductId && (
+                  <Typography variant="caption" color="error">
+                    部品・材料を選択してください
+                  </Typography>
+                )}
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} sm={3}>
+              <TextField
+                fullWidth
+                label="数量"
+                type="number"
+                value={editingBomItem.quantity || ''}
+                onChange={(e) => setEditingBomItem(prev => ({ ...prev, quantity: Number(e.target.value) }))}
+                margin="normal"
+                required
+                inputProps={{ min: 0.1, step: 0.1 }}
+                error={!editingBomItem.quantity}
+              />
+            </Grid>
+            <Grid item xs={12} sm={3}>
+              <TextField
+                fullWidth
+                label="単位"
+                value={editingBomItem.unit || ''}
+                onChange={(e) => setEditingBomItem(prev => ({ ...prev, unit: e.target.value }))}
+                margin="normal"
+                required
+                error={!editingBomItem.unit}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                label="取り付け位置"
+                type="number"
+                value={editingBomItem.position || ''}
+                onChange={(e) => setEditingBomItem(prev => ({ ...prev, position: e.target.value }))}
+                margin="normal"
+                inputProps={{ min: 1 }}
+                helperText="部品の取り付け順序"
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <FormControl fullWidth margin="normal">
+                <InputLabel>オプション設定</InputLabel>
+                <Select
+                  value={editingBomItem.isOptional || false}
+                  onChange={(e) => setEditingBomItem(prev => ({ ...prev, isOptional: e.target.value === 'true' }))}
+                >
+                  <MenuItem value="false">必須部品</MenuItem>
+                  <MenuItem value="true">オプション部品</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="備考・特記事項"
+                multiline
+                rows={3}
+                value={editingBomItem.notes || ''}
+                onChange={(e) => setEditingBomItem(prev => ({ ...prev, notes: e.target.value }))}
+                margin="normal"
+                placeholder="部品の取り付け方法、注意事項、品質要求などを記入してください"
+              />
+            </Grid>
+          </Grid>
+          
+          {/* 選択された部品の情報表示 */}
+          {editingBomItem.childProductId && (
+            <Box sx={{ mt: 2, p: 2, backgroundColor: 'info.light', borderRadius: 1 }}>
+              <Typography variant="subtitle2" color="info.dark" gutterBottom>
+                📋 選択された部品情報
+              </Typography>
+              {(() => {
+                const selectedBomComponent = components.find(c => c.id === editingBomItem.childProductId);
+                if (selectedBomComponent) {
+                  return (
+                    <Grid container spacing={2}>
+                      <Grid item xs={6}>
+                        <Typography variant="body2" color="info.dark">
+                          <strong>部品名:</strong> {selectedBomComponent.name}
+                        </Typography>
+                      </Grid>
+                      <Grid item xs={6}>
+                        <Typography variant="body2" color="info.dark">
+                          <strong>コード:</strong> {selectedBomComponent.code}
+                        </Typography>
+                      </Grid>
+                      <Grid item xs={6}>
+                        <Typography variant="body2" color="info.dark">
+                          <strong>タイプ:</strong> {selectedBomComponent.type}
+                        </Typography>
+                      </Grid>
+                      <Grid item xs={6}>
+                        <Typography variant="body2" color="info.dark">
+                          <strong>単価:</strong> ¥{selectedBomComponent.unitCost.toLocaleString()}
+                        </Typography>
+                      </Grid>
+                    </Grid>
+                  );
+                }
+                return null;
+              })()}
+            </Box>
+          )}
+
+          {/* 既に登録済みのBOM項目一覧 */}
+          {selectedComponent && selectedComponent.bomItems.length > 0 && (
+            <Box sx={{ mt: 3, p: 2, backgroundColor: 'warning.light', borderRadius: 1 }}>
+              <Typography variant="subtitle2" color="warning.dark" gutterBottom>
+                ⚠️ 既に登録済みのBOM項目
+              </Typography>
+              <Typography variant="body2" color="warning.dark" sx={{ mb: 2 }}>
+                以下の部品は既にBOM項目として登録されています。重複登録はできません。
+              </Typography>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                {selectedComponent.bomItems.map((bomItem) => {
+                  const bomComponent = components.find(c => c.id === bomItem.childProductId);
+                  return (
+                    <Chip
+                      key={`existing-${bomItem.id}`}
+                      label={`${bomComponent?.name || '不明'} (${bomComponent?.code || 'N/A'}) × ${bomItem.quantity} ${bomItem.unit}`}
+                      size="small"
+                      color="warning"
+                      variant="outlined"
+                      icon={<InventoryIcon fontSize="small" />}
+                    />
+                  );
+                })}
+              </Box>
+            </Box>
+          )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setBomDialogOpen(false)}>キャンセル</Button>
-          <Button onClick={handleSaveBOMItem} variant="contained">保存</Button>
+          <Button onClick={() => {
+            setBomDialogOpen(false);
+            setEditingBomItem({
+              childProductId: '',
+              quantity: 1,
+              unit: '個',
+              isOptional: false,
+              position: '1',
+              notes: '',
+              alternativeProducts: [],
+            });
+          }}>
+            キャンセル
+          </Button>
+          <Button 
+            onClick={handleSaveBOMItem} 
+            variant="contained"
+            disabled={!editingBomItem.childProductId || !editingBomItem.quantity || !editingBomItem.unit}
+            startIcon={editingBomItem.id ? <EditIcon /> : <AddIcon />}
+          >
+            {editingBomItem.id ? '更新' : '追加'}
+          </Button>
         </DialogActions>
       </Dialog>
 
