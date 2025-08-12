@@ -23,7 +23,7 @@ import ReactFlow, {
 import { Box, Paper, Drawer, IconButton, Tooltip, Fab, SpeedDial, SpeedDialAction, SpeedDialIcon, Typography, Button, Dialog, DialogTitle, DialogContent, DialogActions, List, ListItem, ListItemIcon, ListItemText, Checkbox, Divider, TextField, Slider } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import { ProcessNodeData, ConnectionData } from '../../types/networkEditor';
-import { Product, BOMItem, ProductVariant, AdvancedProcessData, MaterialInput, ProductOutput } from '../../types/productionTypes';
+import { Product, AdvancedProcessData, MaterialInput, ProductOutput } from '../../types/productionTypes';
 import { ProjectNetworkData as ProjectNetworkDataType } from '../../types/projectTypes';
 import {
   Menu as MenuIcon,
@@ -34,9 +34,9 @@ import {
   Build as AssemblyIcon,
   Search as InspectionIcon,
   Inventory as StorageIcon,
-  LocalShipping as ShippingIcon,
+
   Rule as ValidateIcon,
-  Receipt as BOMIcon,
+
   Folder as ProjectIcon,
   Help as HelpIcon,
   Close as CloseIcon,
@@ -53,7 +53,7 @@ import AdvancedProcessDialog from '../production/AdvancedProcessDialog';
 import ProcessMaterialDialog from '../production/ProcessMaterialDialog';
 import IEAnalysisPanel from './IEAnalysisPanel';
 import NetworkValidationPanel from './NetworkValidationPanel';
-import BOMManager from '../production/BOMManager';
+
 import ProcessNode from './ProcessNode';
 import StoreNode from './StoreNode';
 import TransportEdge from './TransportEdge';
@@ -94,6 +94,7 @@ const NetworkEditor = () => {
   const navigate = useNavigate();
 
   const { currentProject, networkData } = useSelector((state: RootState) => state.project);
+  const { components } = useSelector((state: RootState) => state.components);
 
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
@@ -115,13 +116,12 @@ const NetworkEditor = () => {
   const [loading, setLoading] = useState(false);
   const [simulationTime, setSimulationTime] = useState(60); // Default to 60 minutes
   const [simulationSpeed, setSimulationSpeed] = useState(1.0); // Default to 1.0x
-  const [activePanel, setActivePanel] = useState<'simulation' | 'analysis' | 'validation' | 'bom' | null>(null);
+  const [activePanel, setActivePanel] = useState<'simulation' | 'analysis' | 'validation' | null>(null);
   const [analysisPanelOpen, setAnalysisPanelOpen] = useState(false);
   const [validationPanelOpen, setValidationPanelOpen] = useState(false);
-  const [bomPanelOpen, setBomPanelOpen] = useState(false);
   const [simulationPanelOpen, setSimulationPanelOpen] = useState(false);
 
-  const isPanelOpen = analysisPanelOpen || validationPanelOpen || bomPanelOpen || simulationPanelOpen;
+  const isPanelOpen = analysisPanelOpen || validationPanelOpen || simulationPanelOpen;
 
   // 工程ごとの材料データ管理
   const [processAdvancedData, setProcessAdvancedData] = useState<Map<string, AdvancedProcessData>>(new Map());
@@ -153,6 +153,14 @@ const NetworkEditor = () => {
     if (networkData) {
       setNodes(networkData.nodes || []);
       setEdges(networkData.edges || []);
+      
+      // process_advanced_dataを復元
+      if (networkData.process_advanced_data) {
+        console.log('Restoring process_advanced_data from networkData:', networkData.process_advanced_data);
+        const restoredProcessData = new Map(Object.entries(networkData.process_advanced_data));
+        setProcessAdvancedData(restoredProcessData);
+        console.log('Restored process_advanced_data size:', restoredProcessData.size);
+      }
     }
   }, [networkData]);
 
@@ -161,9 +169,13 @@ const NetworkEditor = () => {
     if (processAdvancedData.size > 0 && currentProject?.id) {
       console.log('processAdvancedData changed, updating project network...');
       console.log('Current processAdvancedData size:', processAdvancedData.size);
+      console.log('Current processAdvancedData content:', Array.from(processAdvancedData.entries()));
       
       // 材料設定の変更を即座に永続化
       const timeoutId = setTimeout(() => {
+        const processAdvancedDataObject = Object.fromEntries(processAdvancedData);
+        console.log('Saving process_advanced_data:', processAdvancedDataObject);
+        
         dispatch(updateProjectNetwork({
           projectId: currentProject.id,
           networkData: {
@@ -172,7 +184,7 @@ const NetworkEditor = () => {
             products: networkData?.products || [],
             bom_items: networkData?.bom_items || [],
             variants: networkData?.variants || [],
-            process_advanced_data: Object.fromEntries(processAdvancedData),
+            process_advanced_data: processAdvancedDataObject,
           }
         }));
         console.log('Process advanced data updated and persisted');
@@ -271,9 +283,28 @@ const NetworkEditor = () => {
     );
     
     setNodes(updatedNodes);
+    
+    // 即座にプロジェクトネットワークデータを永続化
+    if (currentProject?.id) {
+      setTimeout(() => {
+        dispatch(updateProjectNetwork({
+          projectId: currentProject.id,
+          networkData: {
+            nodes: updatedNodes,
+            edges: edges,
+            products: networkData?.products || [],
+            bom_items: networkData?.bom_items || [],
+            variants: networkData?.variants || [],
+            process_advanced_data: Object.fromEntries(processAdvancedData),
+          }
+        }));
+        console.log('Store node data immediately persisted to project network');
+      }, 100);
+    }
+    
     setStoreEditDialogOpen(false);
     setSelectedStoreNode(null);
-  }, [selectedStoreNode, nodes, setNodes]);
+  }, [selectedStoreNode, nodes, setNodes, currentProject?.id, edges, networkData, processAdvancedData, dispatch]);
 
   // 工程ノードの設定ボタンクリックイベントをリッスン
   useEffect(() => {
@@ -355,10 +386,9 @@ const NetworkEditor = () => {
     };
   }, [nodes, processAdvancedData]);
 
-  // 生産管理データ
+  // 生産管理データ（部品編集ページのデータを使用）
   const [products, setProducts] = useState<Product[]>([]);
-  const [bomItems, setBomItems] = useState<BOMItem[]>([]);
-  const [variants, setVariants] = useState<ProductVariant[]>([]);
+
   const [advancedProcessDialogOpen, setAdvancedProcessDialogOpen] = useState(false);
   const [selectedAdvancedProcess, setSelectedAdvancedProcess] = useState<AdvancedProcessData | null>(null);
 
@@ -514,20 +544,106 @@ const NetworkEditor = () => {
   }, [onKeyDown]);
 
   // 初期化フラグの管理
-  const [hasInitializedSamples, setHasInitializedSamples] = useState(false);
+
 
   // 初期化完了を設定
   useEffect(() => {
     setIsInitialized(true);
   }, []);
 
-  // サンプルデータの初期化（1回のみ）
+  // 部品編集ページのデータを使用
   useEffect(() => {
-    if (!hasInitializedSamples && products.length === 0) {
-      initializeSampleData();
-      setHasInitializedSamples(true);
+    if (components.length > 0) {
+      // 部品編集ページのデータをProduct型に変換
+      const convertedProducts: Product[] = components.map(component => ({
+        id: component.id,
+        name: component.name,
+        code: component.code,
+        type: component.type,
+        version: component.version,
+        description: component.description,
+        unitCost: component.unitCost,
+        leadTime: component.leadTime,
+        supplier: component.supplier,
+        storageConditions: component.storageConditions,
+        isDefective: component.isDefective,
+        originalProductId: component.originalProductId,
+        qualityGrade: component.qualityGrade,
+        category: component.category,
+        unit: component.unit,
+        specifications: component.specifications,
+        bomItems: component.bomItems,
+        createdAt: component.createdAt,
+        updatedAt: component.updatedAt,
+      }));
+      setProducts(convertedProducts);
+    } else {
+      // 部品データが空の場合は、デフォルトの部品データを設定
+      const defaultProducts: Product[] = [
+        {
+          id: 'prod_steel',
+          name: '鋼材',
+          code: 'STEEL-001',
+          type: 'raw_material',
+          version: '1.0',
+          description: '高品質鋼材',
+          unitCost: 500,
+          leadTime: 7,
+          supplier: '鋼材商事',
+          storageConditions: '常温',
+          isDefective: false,
+          originalProductId: undefined,
+          qualityGrade: 'standard',
+        },
+        {
+          id: 'prod_bolt',
+          name: 'ボルト',
+          code: 'BOLT-M8',
+          type: 'component',
+          version: '1.0',
+          description: 'M8 六角ボルト',
+          unitCost: 50,
+          leadTime: 3,
+          supplier: 'ファスナー工業',
+          storageConditions: '常温',
+          isDefective: false,
+          originalProductId: undefined,
+          qualityGrade: 'standard',
+        },
+        {
+          id: 'prod_bracket',
+          name: 'ブラケット',
+          code: 'BRKT-001',
+          type: 'sub_assembly',
+          version: '1.0',
+          description: '鋼材製ブラケット',
+          unitCost: 800,
+          leadTime: 5,
+          supplier: '鋼材商事',
+          storageConditions: '常温',
+          isDefective: false,
+          originalProductId: undefined,
+          qualityGrade: 'standard',
+        },
+        {
+          id: 'prod_final',
+          name: '完成品A',
+          code: 'PROD-A',
+          type: 'finished_product',
+          version: '1.0',
+          description: '最終製品A',
+          unitCost: 2000,
+          leadTime: 10,
+          supplier: '自社製造',
+          storageConditions: '常温',
+          isDefective: false,
+          originalProductId: undefined,
+          qualityGrade: 'standard',
+        },
+      ];
+      setProducts(defaultProducts);
     }
-  }, [hasInitializedSamples, products.length]);
+  }, [components]);
 
   // サンプルデータの初期化
   const initializeSampleData = () => {
@@ -596,58 +712,9 @@ const NetworkEditor = () => {
       },
     ];
 
-    const sampleBOMItems: BOMItem[] = [
-      {
-        id: 'bom_1',
-        parentProductId: 'prod_bracket',
-        childProductId: 'prod_steel',
-        quantity: 1,
-        unit: 'kg',
-        isOptional: false,
-        effectiveDate: new Date(),
-      },
-      {
-        id: 'bom_2',
-        parentProductId: 'prod_final',
-        childProductId: 'prod_bracket',
-        quantity: 2,
-        unit: '個',
-        isOptional: false,
-        effectiveDate: new Date(),
-      },
-      {
-        id: 'bom_3',
-        parentProductId: 'prod_final',
-        childProductId: 'prod_bolt',
-        quantity: 4,
-        unit: '個',
-        isOptional: false,
-        effectiveDate: new Date(),
-      },
-    ];
 
-    const sampleVariants: ProductVariant[] = [
-      {
-        id: 'var_a1',
-        baseProductId: 'prod_final',
-        variantName: '製品A - 標準仕様',
-        variantCode: 'PROD-A-STD',
-        bom: sampleBOMItems,
-        routingId: 'route_1',
-        setupRequirements: [],
-        demand: {
-          dailyDemand: 100,
-          weeklyPattern: [100, 100, 100, 100, 100, 0, 0],
-          seasonality: 1,
-          priority: 'high',
-          customerOrders: [],
-        },
-      },
-    ];
 
     setProducts(sampleProducts);
-    setBomItems(sampleBOMItems);
-    setVariants(sampleVariants);
   };
 
   // ノードやエッジのデータをメモ化
@@ -1167,6 +1234,7 @@ const NetworkEditor = () => {
     (data: ProcessNodeData) => {
       if (!selectedNode) return;
       
+      // ノードデータを更新
       setNodes((nds: Node[]) =>
         nds.map((node: Node) =>
           node.id === selectedNode.id
@@ -1174,10 +1242,100 @@ const NetworkEditor = () => {
             : node
         )
       );
+      
+      // 既存のprocessAdvancedDataを保持しつつ、基本パラメーターを更新
+      setProcessAdvancedData(prev => {
+        const newMap = new Map(prev);
+        const existingData = newMap.get(selectedNode.id);
+        
+        if (existingData) {
+          // 既存の拡張データを保持しつつ、基本パラメーターを更新
+          newMap.set(selectedNode.id, {
+            ...existingData,
+            ...data,
+            // 既存の拡張データは保持
+            inputMaterials: existingData.inputMaterials || [],
+            outputProducts: existingData.outputProducts || [],
+            bomMappings: existingData.bomMappings || [],
+            qualityCheckpoints: existingData.qualityCheckpoints || [],
+            skillRequirements: existingData.skillRequirements || [],
+            toolRequirements: existingData.toolRequirements || [],
+            capacityConstraints: existingData.capacityConstraints || [],
+            setupHistory: existingData.setupHistory || [],
+          });
+        } else {
+          // 新規作成の場合
+          const newProcessData: AdvancedProcessData = {
+            id: selectedNode.id,
+            label: data.label,
+            type: data.type,
+            cycleTime: data.cycleTime,
+            setupTime: data.setupTime,
+            equipmentCount: data.equipmentCount,
+            operatorCount: data.operatorCount,
+            availability: 85, // デフォルト値
+            inputMaterials: [],
+            outputProducts: [],
+            bomMappings: [],
+            schedulingMode: 'push',
+            batchSize: 1,
+            minBatchSize: 1,
+            maxBatchSize: 100,
+            defectRate: data.defectRate,
+            reworkRate: data.reworkRate,
+            operatingCost: data.operatingCost,
+            qualityCheckpoints: [],
+            skillRequirements: [],
+            toolRequirements: [],
+            capacityConstraints: [],
+            setupHistory: [],
+          };
+          newMap.set(selectedNode.id, newProcessData);
+        }
+        
+        return newMap;
+      });
+      
+      // 即座にプロジェクトネットワークデータを永続化
+      if (currentProject?.id) {
+        setTimeout(() => {
+          const currentProcessAdvancedData = new Map(processAdvancedData);
+          const existingData = currentProcessAdvancedData.get(selectedNode.id);
+          
+          if (existingData) {
+            currentProcessAdvancedData.set(selectedNode.id, {
+              ...existingData,
+              ...data,
+              inputMaterials: existingData.inputMaterials || [],
+              outputProducts: existingData.outputProducts || [],
+              bomMappings: existingData.bomMappings || [],
+              qualityCheckpoints: existingData.qualityCheckpoints || [],
+              skillRequirements: existingData.skillRequirements || [],
+              toolRequirements: existingData.toolRequirements || [],
+              capacityConstraints: existingData.capacityConstraints || [],
+              setupHistory: existingData.setupHistory || [],
+            });
+          }
+          
+          dispatch(updateProjectNetwork({
+            projectId: currentProject.id,
+            networkData: {
+              nodes: nodes,
+              edges: edges,
+              products: networkData?.products || [],
+              bom_items: networkData?.bom_items || [],
+              variants: networkData?.variants || [],
+              process_advanced_data: Object.fromEntries(currentProcessAdvancedData),
+            }
+          }));
+          console.log('Process basic parameters immediately persisted to project network');
+        }, 100);
+      }
+      
       setProcessEditDialogOpen(false);
       setSelectedNode(null);
     },
-    [selectedNode, setNodes]
+    [selectedNode, setNodes, currentProject?.id, processAdvancedData, nodes, edges, networkData, dispatch]
   );
 
   // 接続線編集の保存
@@ -1196,11 +1354,34 @@ const NetworkEditor = () => {
             : edge
         )
       );
+      
+      // 即座にプロジェクトネットワークデータを永続化
+      if (currentProject?.id) {
+        setTimeout(() => {
+          dispatch(updateProjectNetwork({
+            projectId: currentProject.id,
+            networkData: {
+              nodes: nodes,
+              edges: edges.map((edge: Edge) =>
+                edge.id === selectedEdge.id
+                  ? { ...edge, data }
+                  : edge
+              ),
+              products: networkData?.products || [],
+              bom_items: networkData?.bom_items || [],
+              variants: networkData?.variants || [],
+              process_advanced_data: Object.fromEntries(processAdvancedData),
+            }
+          }));
+          console.log('Connection data immediately persisted to project network');
+        }, 100);
+      }
+      
       setConnectionEditDialogOpen(false);
       setSelectedEdge(null);
       console.log('NetworkEditor: Connection edit completed');
     },
-    [selectedEdge, setEdges]
+    [selectedEdge, setEdges, currentProject?.id, nodes, edges, networkData, processAdvancedData, dispatch]
   );
 
   // 接続線編集ダイアログを閉じる（Hooksはトップレベルで宣言）
@@ -1247,7 +1428,7 @@ const NetworkEditor = () => {
         reworkRate: 1.0,
         operatingCost: 120,
         inputs: [],
-        outputs: ['PART_A'],
+        outputs: ['prod_steel'],
       },
       assembly: {
         label: '組立',
@@ -1261,8 +1442,8 @@ const NetworkEditor = () => {
         defectRate: 1.0,
         reworkRate: 0.5,
         operatingCost: 150,
-        inputs: ['PART_A', 'PART_B'],
-        outputs: ['SUB_ASSY'],
+        inputs: ['prod_steel', 'prod_bolt'],
+        outputs: ['prod_bracket'],
       },
       inspection: {
         label: '検査',
@@ -1276,8 +1457,8 @@ const NetworkEditor = () => {
         defectRate: 0.5,
         reworkRate: 10.0,
         operatingCost: 80,
-        inputs: ['SUB_ASSY'],
-        outputs: ['INSPECTED_ASSY'],
+        inputs: ['prod_bracket'],
+        outputs: ['prod_bracket'],
       },
       storage: {
         label: '保管',
@@ -1291,24 +1472,10 @@ const NetworkEditor = () => {
         defectRate: 0,
         reworkRate: 0,
         operatingCost: 10,
-        inputs: ['INSPECTED_ASSY'],
-        outputs: ['STORED_PRODUCT'],
+        inputs: ['prod_bracket'],
+        outputs: ['prod_bracket'],
       },
-      shipping: {
-        label: '出荷',
-        type: 'shipping',
-        equipmentCount: 1,
-        operatorCount: 2,
-        cycleTime: 45,
-        setupTime: 120,
-        inputBufferCapacity: 100,
-        outputBufferCapacity: 0,
-        defectRate: 0,
-        reworkRate: 0,
-        operatingCost: 100,
-        inputs: ['STORED_PRODUCT'],
-        outputs: [],
-      },
+
       store: {
         label: 'ストア',
         type: 'store',
@@ -1317,12 +1484,12 @@ const NetworkEditor = () => {
         cycleTime: 5,
         setupTime: 0,
         inputBufferCapacity: 1000,
-        outputBufferCapacity: 1000,
+        outputBufferCapacity: 0, // 最後の工程なので出力は不要
         defectRate: 0,
         reworkRate: 0,
         operatingCost: 10,
-        inputs: [],
-        outputs: [],
+        inputs: ['prod_bracket'], // 前工程からの入力を想定
+        outputs: [], // 最後の工程なので出力は空
         storeType: 'component',
         productionSchedule: [],
         inventoryLevels: [],
@@ -1352,7 +1519,6 @@ const NetworkEditor = () => {
     { icon: <AssemblyIcon />, name: '組立', type: 'assembly' },
     { icon: <InspectionIcon />, name: '検査', type: 'inspection' },
     { icon: <StorageIcon />, name: '保管', type: 'storage' },
-    { icon: <ShippingIcon />, name: '出荷', type: 'shipping' },
     { icon: <StoreIcon />, name: 'ストア', type: 'store' },
   ];
 
@@ -1684,7 +1850,6 @@ const NetworkEditor = () => {
                           setSimulationPanelOpen(true);
                           setAnalysisPanelOpen(false);
                           setValidationPanelOpen(false);
-                          setBomPanelOpen(false);
                         }
                       }}
                       sx={{
@@ -1707,7 +1872,6 @@ const NetworkEditor = () => {
                           setActivePanel('analysis');
                           setAnalysisPanelOpen(true);
                           setValidationPanelOpen(false);
-                          setBomPanelOpen(false);
                           setSimulationPanelOpen(false);
                         }
                       }}
@@ -1730,7 +1894,6 @@ const NetworkEditor = () => {
                           setActivePanel('validation');
                           setValidationPanelOpen(true);
                           setAnalysisPanelOpen(false);
-                          setBomPanelOpen(false);
                           setSimulationPanelOpen(false);
                         }
                       }}
@@ -1742,29 +1905,7 @@ const NetworkEditor = () => {
                       <ValidateIcon />
                     </IconButton>
                   </Tooltip>
-                  <Tooltip title="BOM管理">
-                    <IconButton 
-                      size="small" 
-                      onClick={() => {
-                        if (bomPanelOpen && activePanel === 'bom') {
-                          setBomPanelOpen(false);
-                          setActivePanel(null);
-                        } else {
-                          setActivePanel('bom');
-                          setBomPanelOpen(true);
-                          setAnalysisPanelOpen(false);
-                          setValidationPanelOpen(false);
-                          setSimulationPanelOpen(false);
-                        }
-                      }}
-                      sx={{
-                        color: activePanel === 'bom' ? 'primary.main' : 'default',
-                        backgroundColor: activePanel === 'bom' ? 'primary.light' : 'transparent'
-                      }}
-                    >
-                      <BOMIcon />
-                    </IconButton>
-                  </Tooltip>
+
                 </Paper>
               </Box>
               
@@ -1861,7 +2002,7 @@ const NetworkEditor = () => {
               <Typography variant="h6">
                 {activePanel === 'analysis' && 'IE分析'}
                 {activePanel === 'validation' && 'ネットワーク検証'}
-                {activePanel === 'bom' && 'BOM管理'}
+
                 {activePanel === 'simulation' && 'シミュレーション設定'}
               </Typography>
               <Box sx={{ display: 'flex', gap: 1 }}>
@@ -1874,7 +2015,6 @@ const NetworkEditor = () => {
                         setActivePanel('analysis');
                         setAnalysisPanelOpen(true);
                         setValidationPanelOpen(false);
-                        setBomPanelOpen(false);
                         setSimulationPanelOpen(false);
                       }
                     }} 
@@ -1893,7 +2033,6 @@ const NetworkEditor = () => {
                         setActivePanel('validation');
                         setValidationPanelOpen(true);
                         setAnalysisPanelOpen(false);
-                        setBomPanelOpen(false);
                         setSimulationPanelOpen(false);
                       }
                     }} 
@@ -1903,25 +2042,7 @@ const NetworkEditor = () => {
                     <ValidateIcon />
                   </IconButton>
                 </Tooltip>
-                <Tooltip title="BOM管理">
-                  <IconButton 
-                    onClick={() => {
-                      if (activePanel === 'bom' && bomPanelOpen) {
-                        setBomPanelOpen(false);
-                      } else {
-                        setActivePanel('bom');
-                        setBomPanelOpen(true);
-                        setAnalysisPanelOpen(false);
-                        setValidationPanelOpen(false);
-                        setSimulationPanelOpen(false);
-                      }
-                    }} 
-                    size="small"
-                    color={activePanel === 'bom' ? 'primary' : 'default'}
-                  >
-                    <BOMIcon />
-                  </IconButton>
-                </Tooltip>
+
                 <Tooltip title="シミュレーション設定">
                   <IconButton 
                     onClick={() => {
@@ -1932,7 +2053,6 @@ const NetworkEditor = () => {
                         setSimulationPanelOpen(true);
                         setAnalysisPanelOpen(false);
                         setValidationPanelOpen(false);
-                        setBomPanelOpen(false);
                       }
                     }} 
                     size="small"
@@ -1946,7 +2066,6 @@ const NetworkEditor = () => {
                     // 現在開いているパネルを閉じる
                     setAnalysisPanelOpen(false);
                     setValidationPanelOpen(false);
-                    setBomPanelOpen(false);
                     setSimulationPanelOpen(false);
                     setActivePanel(null);
                   }} 
@@ -1975,22 +2094,7 @@ const NetworkEditor = () => {
                   onHighlightEdges={handleHighlightEdges}
                 />
               )}
-              {activePanel === 'bom' && (
-                <BOMManager
-                  products={products}
-                  bomItems={bomItems}
-                  variants={variants}
-                  onProductAdd={(product) => setProducts([...products, product])}
-                  onProductUpdate={(updatedProduct) => {
-                    setProducts(products.map(p => p.id === updatedProduct.id ? updatedProduct : p));
-                  }}
-                  onProductDelete={(productId) => {
-                    setProducts(products.filter(p => p.id !== productId));
-                  }}
-                  onBOMUpdate={setBomItems}
-                  onVariantUpdate={setVariants}
-                />
-              )}
+
               {activePanel === 'simulation' && (
                 <Box>
                   <Typography variant="h6" gutterBottom>シミュレーション実行設定</Typography>
@@ -2072,6 +2176,7 @@ const NetworkEditor = () => {
                 nodes.find(n => n.id === selectedEdge.source)?.data :
                 undefined
             }
+            components={components}
           />
 
           {/* 出力製品選択ダイアログ */}
@@ -2262,6 +2367,28 @@ const NetworkEditor = () => {
               console.log('Advanced process data saved:', processData);
               // 工程の拡張データを保存
               setProcessAdvancedData(prev => new Map(prev.set(processData.id, processData)));
+              
+              // 即座にプロジェクトネットワークデータを永続化
+              if (currentProject?.id) {
+                setTimeout(() => {
+                  const currentProcessAdvancedData = new Map(processAdvancedData);
+                  currentProcessAdvancedData.set(processData.id, processData);
+                  
+                  dispatch(updateProjectNetwork({
+                    projectId: currentProject.id,
+                    networkData: {
+                      nodes: nodes,
+                      edges: edges,
+                      products: networkData?.products || [],
+                      bom_items: networkData?.bom_items || [],
+                      variants: networkData?.variants || [],
+                      process_advanced_data: Object.fromEntries(currentProcessAdvancedData),
+                    }
+                  }));
+                  console.log('Advanced process data immediately persisted to project network');
+                }, 100);
+              }
+              
               setAdvancedProcessDialogOpen(false);
               setSelectedAdvancedProcess(null);
             }}
@@ -2291,20 +2418,30 @@ const NetworkEditor = () => {
                 return newMap;
               });
               
-              // 保存完了の確認
-              setTimeout(() => {
-                const savedData = processAdvancedData.get(processData.id);
-                console.log('Verification - saved data retrieved:', savedData);
-                if (savedData) {
-                  console.log('✅ Process material data successfully saved');
+              // 保存成功の通知（保存処理は確実に完了している）
+              console.log('✅ Process material data successfully saved');
+              alert(`✅ 工程材料設定が保存されました！\n\n工程: ${processData.label}\n投入材料: ${processData.inputMaterials.length}種類\n出力製品: ${processData.outputProducts.length}種類\n\nこれで、この工程との接続時に材料が自動継承されます。`);
+              
+              // 即座にプロジェクトネットワークデータを永続化
+              if (currentProject?.id) {
+                setTimeout(() => {
+                  const currentProcessAdvancedData = new Map(processAdvancedData);
+                  currentProcessAdvancedData.set(processData.id, processData);
                   
-                  // 保存成功の通知
-                  alert(`✅ 工程材料設定が保存されました！\n\n工程: ${processData.label}\n投入材料: ${processData.inputMaterials.length}種類\n出力製品: ${processData.outputProducts.length}種類\n\nこれで、この工程との接続時に材料が自動継承されます。`);
-                } else {
-                  console.log('❌ Process material data not found after save');
-                  alert('❌ 保存に失敗しました。再度お試しください。');
-                }
-              }, 100);
+                  dispatch(updateProjectNetwork({
+                    projectId: currentProject.id,
+                    networkData: {
+                      nodes: nodes,
+                      edges: edges,
+                      products: networkData?.products || [],
+                      bom_items: networkData?.bom_items || [],
+                      variants: networkData?.variants || [],
+                      process_advanced_data: Object.fromEntries(currentProcessAdvancedData),
+                    }
+                  }));
+                  console.log('Process material data immediately persisted to project network');
+                }, 100);
+              }
               
               setMaterialDialogOpen(false);
               setSelectedProcessForMaterial(null);

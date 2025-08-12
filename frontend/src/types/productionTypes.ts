@@ -20,6 +20,59 @@ export interface Product {
 }
 
 /**
+ * 部品の基本情報
+ */
+export interface Component {
+  id: string;
+  name: string;
+  code: string;
+  type: 'raw_material' | 'component' | 'sub_assembly' | 'finished_product' | 'defective_product';
+  version: string;
+  description: string;
+  unitCost: number;
+  leadTime: number;
+  supplier: string;
+  storageConditions: string;
+  isDefective: boolean;
+  originalProductId?: string;
+  qualityGrade: string;
+  category: string;
+  unit: string;
+  specifications: Record<string, any>;
+  bomItems: ComponentBOMItem[];
+  transportLotSize: number; // 搬送ロットサイズ
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * 部品BOMアイテム
+ */
+export interface ComponentBOMItem {
+  id: string;
+  parentProductId: string;
+  childProductId: string;
+  quantity: number;
+  unit: string;
+  position?: string;
+  isOptional: boolean;
+  effectiveDate: Date;
+  expiryDate?: Date;
+  alternativeProducts: string[];
+  notes: string;
+}
+
+/**
+ * 部品カテゴリ
+ */
+export interface ComponentCategory {
+  id: string;
+  name: string;
+  description: string;
+  parentId?: string;
+}
+
+/**
  * BOM（部品構成表）のアイテム
  */
 export interface BOMItem {

@@ -9,7 +9,7 @@ export interface ValidationResult {
 }
 
 export interface ValidationError {
-  type: 'cycle' | 'disconnected' | 'missing_input' | 'missing_output' | 'invalid_connection';
+  type: 'cycle' | 'disconnected' | 'missing_input' | 'missing_output' | 'invalid_connection' | 'missing_end' | 'invalid_end' | 'multiple_ends';
   message: string;
   nodeIds?: string[];
   edgeIds?: string[];
@@ -69,6 +69,10 @@ export const validateNetwork = (
   // 6. レイアウトの問題検出
   const layoutWarnings = detectLayoutIssues(nodes, edges);
   warnings.push(...layoutWarnings);
+
+  // 7. ストアが最後にあることの確認
+  const storeEndErrors = validateStoreAtEnd(nodes, edges);
+  errors.push(...storeEndErrors);
 
   return {
     isValid: errors.length === 0,
@@ -195,7 +199,7 @@ export const validateInputOutputConsistency = (
     }
 
     // 出力がない工程（終了工程以外）
-    if (outgoingEdges.length === 0 && node.data.type !== 'shipping') {
+    if (outgoingEdges.length === 0 && node.data.type !== 'store') {
       if (incomingEdges.length > 0) { // 入力があるのに出力がない
         errors.push({
           type: 'missing_output',
@@ -475,4 +479,60 @@ const doLinesIntersect = (
   const u = -((p1.x - p2.x) * (p1.y - p3.y) - (p1.y - p2.y) * (p1.x - p3.x)) / denominator;
 
   return t >= 0 && t <= 1 && u >= 0 && u <= 1;
+};
+
+/**
+ * ストアが最後にあることの確認
+ */
+export const validateStoreAtEnd = (
+  nodes: NetworkNode[],
+  edges: NetworkEdge[]
+): ValidationError[] => {
+  const errors: ValidationError[] = [];
+
+  // 出力がないノード（終了ノード）を特定
+  const endNodes = nodes.filter(node => {
+    const outgoingEdges = edges.filter(e => e.source === node.id);
+    return outgoingEdges.length === 0;
+  });
+
+  // 終了ノードが存在しない場合
+  if (endNodes.length === 0) {
+    errors.push({
+      type: 'missing_end',
+      severity: 'error',
+      message: 'ネットワークに終了工程がありません。ストアを最後に配置してください。',
+      nodeIds: [],
+    });
+    return errors;
+  }
+
+  // 終了ノードの中にストアが含まれているかチェック
+  const hasStoreAtEnd = endNodes.some(node => node.data.type === 'store');
+
+  if (!hasStoreAtEnd) {
+    const endNodeNames = endNodes.map(node => node.data.label).join(', ');
+    errors.push({
+      type: 'invalid_end',
+      severity: 'error',
+      message: `終了工程にストアが含まれていません。現在の終了工程: ${endNodeNames}。ストアを最後に配置してください。`,
+      nodeIds: endNodes.map(node => node.id),
+    });
+  }
+
+  // 複数の終了ノードがある場合の警告
+  if (endNodes.length > 1) {
+    const nonStoreEndNodes = endNodes.filter(node => node.data.type !== 'store');
+    if (nonStoreEndNodes.length > 0) {
+      const nonStoreNames = nonStoreEndNodes.map(node => node.data.label).join(', ');
+      errors.push({
+        type: 'multiple_ends',
+        severity: 'warning',
+        message: `複数の終了工程があります。非ストア工程: ${nonStoreNames}。ストア以外の工程は削除するか、ストアに接続してください。`,
+        nodeIds: nonStoreEndNodes.map(node => node.id),
+      });
+    }
+  }
+
+  return errors;
 };

@@ -22,6 +22,7 @@ import {
   Settings as SettingsIcon,
   Folder as ProjectIcon,
   Help as HelpIcon,
+  Build as ComponentIcon,
 } from '@mui/icons-material';
 import ConnectionStatus from '../status/ConnectionStatus';
 
@@ -43,6 +44,7 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
     { text: 'プロジェクト', icon: <ProjectIcon />, path: '/projects' },
     { text: 'シミュレーター', icon: <DashboardIcon />, path: '/' },
     { text: 'ネットワーク編集', icon: <NetworkIcon />, path: '/network-editor' },
+    { text: '部品編集', icon: <ComponentIcon />, path: '/component-editor' },
     { text: '分析', icon: <AnalyticsIcon />, path: '/analytics' },
     { text: 'ヘルプ', icon: <HelpIcon />, path: '/help' },
   ];

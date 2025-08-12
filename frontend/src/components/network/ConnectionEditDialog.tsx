@@ -58,6 +58,7 @@ interface ConnectionEditDialogProps {
   sourcePosition?: { x: number; y: number };
   targetPosition?: { x: number; y: number };
   sourceNodeData?: any; // 搬送元のノードデータ
+  components?: Array<{id: string, name: string, transportLotSize: number}>; // 部品データ
 }
 
 const ConnectionEditDialog: React.FC<ConnectionEditDialogProps> = ({
@@ -70,6 +71,7 @@ const ConnectionEditDialog: React.FC<ConnectionEditDialogProps> = ({
   sourcePosition,
   targetPosition,
   sourceNodeData,
+  components = [],
 }) => {
   const [editData, setEditData] = useState<ConnectionData>({
     transportTime: 30,
@@ -104,18 +106,89 @@ const ConnectionEditDialog: React.FC<ConnectionEditDialogProps> = ({
     
     // 搬送元の出力製品を設定
     if (sourceNodeData && sourceNodeData.outputs && sourceNodeData.outputs.length > 0) {
-      // 実際の出力製品IDから製品名を取得（実際の実装では製品マスタから取得）
-      const products = sourceNodeData.outputs.map((productId: string, index: number) => ({
-        id: productId,
-        name: `完成品${String.fromCharCode(65 + index)}` // A, B, C... として表示
+      // 接続元の出力部品IDから部品名を取得
+      const products = sourceNodeData.outputs.map((productId: string) => {
+        // まず、componentsから該当する部品データを検索
+        const component = components.find(c => c.id === productId);
+        if (component) {
+          return {
+            id: component.id,
+            name: component.name
+          };
+        }
+        
+        // 抽象的な部品IDを実際の部品IDにマッピング
+        let actualProductId = productId;
+        let displayName = '';
+        
+        switch (productId) {
+          case 'STORED_PRODUCT':
+            // 保管製品は、前工程の出力製品と同じ
+            actualProductId = 'prod_bracket';
+            displayName = 'ブラケット（保管製品）';
+            break;
+          case 'INSPECTED_ASSY':
+            actualProductId = 'prod_bracket';
+            displayName = 'ブラケット（検査済み）';
+            break;
+          case 'SUB_ASSY':
+            actualProductId = 'prod_bracket';
+            displayName = 'ブラケット（サブアセンブリ）';
+            break;
+          case 'PART_A':
+            actualProductId = 'prod_steel';
+            displayName = '鋼材（部品A）';
+            break;
+          case 'PART_B':
+            actualProductId = 'prod_bolt';
+            displayName = 'ボルト（部品B）';
+            break;
+          default:
+            // 既存の部品IDとの照合を試行
+            if (productId.startsWith('prod_')) {
+              const existingComponent = components.find(c => c.id === productId);
+              if (existingComponent) {
+                actualProductId = existingComponent.id;
+                displayName = existingComponent.name;
+              } else {
+                actualProductId = productId;
+                displayName = `部品${productId}`;
+              }
+            } else {
+              actualProductId = productId;
+              displayName = `部品${productId}`;
+            }
+        }
+        
+        // マッピングされた実際の部品IDが存在するかチェック
+        const mappedComponent = components.find(c => c.id === actualProductId);
+        if (mappedComponent) {
+          return {
+            id: actualProductId,
+            name: mappedComponent.name
+          };
+        }
+        
+        return {
+          id: actualProductId,
+          name: displayName
+        };
+      });
+      setAvailableProducts(products);
+    } else if (components && components.length > 0) {
+      // 部品データが利用可能な場合は、すべての部品を表示
+      const products = components.map(component => ({
+        id: component.id,
+        name: component.name
       }));
       setAvailableProducts(products);
     } else {
-      // サンプルの利用可能製品を設定（実際の実装では搬送元の出力製品を取得）
+      // サンプルの利用可能部品を設定（開発用）
       setAvailableProducts([
-        { id: 'product1', name: '完成品A' },
-        { id: 'product2', name: '完成品B' },
-        { id: 'product3', name: '完成品C' },
+        { id: 'prod_steel', name: '鋼材' },
+        { id: 'prod_bolt', name: 'ボルト' },
+        { id: 'prod_bracket', name: 'ブラケット' },
+        { id: 'prod_final', name: '完成品A' },
       ]);
     }
   }, [initialData, open, sourceNodeName, targetNodeName, sourcePosition, targetPosition, sourceNodeData]);
@@ -159,11 +232,16 @@ const ConnectionEditDialog: React.FC<ConnectionEditDialogProps> = ({
     const method = transportMethods.find(m => m.id === methodId);
     if (!method) return;
 
+    // 部品データから搬送ロットサイズを取得
+    const selectedProduct = availableProducts[0];
+    const componentData = components?.find(c => c.id === selectedProduct?.id);
+    const defaultLotSize = componentData?.transportLotSize || 10;
+
     const newLot: TransportProduct = {
       id: generateId(),
-      productId: availableProducts[0]?.id || '',
-      productName: availableProducts[0]?.name || '',
-      lotSize: 10,
+      productId: selectedProduct?.id || '',
+      productName: selectedProduct?.name || '',
+      lotSize: defaultLotSize,
       priority: method.transportProducts.length + 1,
     };
 
@@ -701,7 +779,7 @@ const ConnectionEditDialog: React.FC<ConnectionEditDialogProps> = ({
                             size="small"
                             onClick={() => autoAdjustTransportCapacity(method.id)}
                             sx={{ mt: 1, minWidth: 'auto', px: 1 }}
-                            title="部品ロットサイズから自動計算"
+                                                         title="搬送部品ロットサイズから自動計算"
                           >
                             自動
                           </Button>
@@ -843,26 +921,26 @@ const ConnectionEditDialog: React.FC<ConnectionEditDialogProps> = ({
                       {/* 部品ロットの管理 */}
                       <Grid item xs={12}>
                         <Box sx={{ mt: 2, p: 2, backgroundColor: 'grey.50', borderRadius: 1 }}>
-                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
-                            <Typography variant="subtitle2" color="primary">
-                              <ProductIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
-                              部品ロット設定
-                            </Typography>
-                            <Button
-                              variant="outlined"
-                              size="small"
-                              startIcon={<AddIcon />}
-                              onClick={() => addProductLot(method.id)}
-                            >
-                              部品ロット追加
-                            </Button>
-                          </Box>
+                                                     <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+                             <Typography variant="subtitle2" color="primary">
+                               <ProductIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
+                               搬送部品設定
+                             </Typography>
+                             <Button
+                               variant="outlined"
+                               size="small"
+                               startIcon={<AddIcon />}
+                               onClick={() => addProductLot(method.id)}
+                             >
+                               搬送部品追加
+                             </Button>
+                           </Box>
                           
-                          {method.transportProducts.length === 0 ? (
-                            <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center' }}>
-                              部品ロットが設定されていません
-                            </Typography>
-                          ) : (
+                                                     {method.transportProducts.length === 0 ? (
+                             <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center' }}>
+                               搬送部品が設定されていません
+                             </Typography>
+                           ) : (
                             <List dense>
                               {method.transportProducts.map((lot) => (
                                 <ListItem key={lot.id} sx={{ backgroundColor: 'white', mb: 1, borderRadius: 1 }}>
@@ -874,9 +952,13 @@ const ConnectionEditDialog: React.FC<ConnectionEditDialogProps> = ({
                                             value={lot.productId}
                                             onChange={(e) => {
                                               const product = availableProducts.find(p => p.id === e.target.value);
+                                              const componentData = components.find(c => c.id === e.target.value);
+                                              const defaultLotSize = componentData?.transportLotSize || 10;
+                                              
                                               updateProductLot(method.id, lot.id, { 
                                                 productId: e.target.value as string,
-                                                productName: product?.name || ''
+                                                productName: product?.name || '',
+                                                lotSize: defaultLotSize
                                               });
                                             }}
                                             displayEmpty
