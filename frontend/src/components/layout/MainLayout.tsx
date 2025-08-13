@@ -23,8 +23,13 @@ import {
   Folder as ProjectIcon,
   Help as HelpIcon,
   Build as ComponentIcon,
+  DragIndicator as DragIcon,
 } from '@mui/icons-material';
 import ConnectionStatus from '../status/ConnectionStatus';
+import SettingsPanel from './SettingsPanel';
+import SidebarConfig from './SidebarConfig';
+import KeyboardShortcuts from './KeyboardShortcuts';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 const drawerWidth = 240;
 
@@ -33,20 +38,41 @@ interface MainLayoutProps {
 }
 
 const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
+  const { t } = useLanguage();
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = React.useState(false);
+  const [settingsOpen, setSettingsOpen] = React.useState(false);
+  const [sidebarConfigOpen, setSidebarConfigOpen] = React.useState(false);
+  const [currentDrawerWidth, setCurrentDrawerWidth] = React.useState(() => {
+    const saved = localStorage.getItem('sidebar-width');
+    return saved ? parseInt(saved) : drawerWidth;
+  });
+  const [sidebarVisible, setSidebarVisible] = React.useState(() => {
+    const saved = localStorage.getItem('sidebar-visible');
+    return saved ? JSON.parse(saved) : true;
+  });
 
   const handleDrawerToggle = () => {
     setMobileOpen(!mobileOpen);
   };
 
+  const handleDrawerWidthChange = (width: number) => {
+    setCurrentDrawerWidth(width);
+    localStorage.setItem('sidebar-width', width.toString());
+  };
+
+  const handleSidebarVisibilityChange = (visible: boolean) => {
+    setSidebarVisible(visible);
+    localStorage.setItem('sidebar-visible', JSON.stringify(visible));
+  };
+
   const menuItems = [
-    { text: 'プロジェクト', icon: <ProjectIcon />, path: '/projects' },
-    { text: 'シミュレーター', icon: <DashboardIcon />, path: '/' },
-    { text: 'ネットワーク編集', icon: <NetworkIcon />, path: '/network-editor' },
-    { text: '部品編集', icon: <ComponentIcon />, path: '/component-editor' },
-    { text: '分析', icon: <AnalyticsIcon />, path: '/analytics' },
-    { text: 'ヘルプ', icon: <HelpIcon />, path: '/help' },
+    { text: t('sidebar.projects'), icon: <ProjectIcon />, path: '/projects' },
+    { text: t('sidebar.simulator'), icon: <DashboardIcon />, path: '/' },
+    { text: t('sidebar.networkEditor'), icon: <NetworkIcon />, path: '/network-editor' },
+    { text: t('sidebar.componentEditor'), icon: <ComponentIcon />, path: '/component-editor' },
+    { text: t('sidebar.analytics'), icon: <AnalyticsIcon />, path: '/analytics' },
+    { text: t('sidebar.help'), icon: <HelpIcon />, path: '/help' },
   ];
 
   const drawer = (
@@ -82,11 +108,19 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
       <Divider />
       <List>
         <ListItem disablePadding>
-          <ListItemButton>
+          <ListItemButton onClick={() => setSettingsOpen(true)}>
             <ListItemIcon>
               <SettingsIcon />
             </ListItemIcon>
-            <ListItemText primary="設定" />
+            <ListItemText primary={t('sidebar.settings')} />
+          </ListItemButton>
+        </ListItem>
+        <ListItem disablePadding>
+          <ListItemButton onClick={() => setSidebarConfigOpen(true)}>
+            <ListItemIcon>
+              <DragIcon />
+            </ListItemIcon>
+            <ListItemText primary={t('sidebar.sidebarConfig')} />
           </ListItemButton>
         </ListItem>
       </List>
@@ -98,8 +132,8 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
       <AppBar
         position="fixed"
         sx={{
-          width: { sm: `calc(100% - ${drawerWidth}px)` },
-          ml: { sm: `${drawerWidth}px` },
+          width: { sm: `calc(100% - ${sidebarVisible ? currentDrawerWidth : 0}px)` },
+          ml: { sm: `${sidebarVisible ? currentDrawerWidth : 0}px` },
         }}
       >
         <Toolbar>
@@ -113,14 +147,18 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
             <MenuIcon />
           </IconButton>
           <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
-            混流生産ライン離散シミュレーター
+            {t('app.title')}
           </Typography>
           <ConnectionStatus />
         </Toolbar>
       </AppBar>
       <Box
         component="nav"
-        sx={{ width: { sm: drawerWidth }, flexShrink: { sm: 0 } }}
+        sx={{ 
+          width: { sm: sidebarVisible ? currentDrawerWidth : 0 }, 
+          flexShrink: { sm: 0 },
+          display: { sm: sidebarVisible ? 'block' : 'none' }
+        }}
       >
         <Drawer
           variant="temporary"
@@ -145,7 +183,7 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
             display: { xs: 'none', sm: 'block' },
             '& .MuiDrawer-paper': {
               boxSizing: 'border-box',
-              width: drawerWidth,
+              width: currentDrawerWidth,
             },
           }}
           open
@@ -157,7 +195,7 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
         component="main"
         sx={{
           flexGrow: 1,
-          width: { sm: `calc(100% - ${drawerWidth}px)` },
+          width: { sm: `calc(100% - ${sidebarVisible ? currentDrawerWidth : 0}px)` },
           display: 'flex',
           flexDirection: 'column',
         }}
@@ -167,6 +205,30 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
             {children}
         </Box>
       </Box>
+      
+      <SettingsPanel 
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+      />
+      
+      <SidebarConfig
+        open={sidebarConfigOpen}
+        onClose={() => setSidebarConfigOpen(false)}
+        drawerWidth={currentDrawerWidth}
+        onDrawerWidthChange={handleDrawerWidthChange}
+        sidebarVisible={sidebarVisible}
+        onSidebarVisibilityChange={handleSidebarVisibilityChange}
+      />
+      
+      <KeyboardShortcuts
+        onToggleSidebar={() => setSidebarVisible(!sidebarVisible)}
+        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenSidebarConfig={() => setSidebarConfigOpen(true)}
+        onNewProject={() => {
+          // 新規プロジェクト作成の処理
+          console.log('新規プロジェクト作成');
+        }}
+      />
     </Box>
   );
 };

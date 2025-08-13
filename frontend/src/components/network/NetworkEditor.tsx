@@ -3,6 +3,7 @@ import { useSelector, useDispatch } from 'react-redux';
 import { RootState, AppDispatch } from '../../store';
 import { setNodes, setEdges } from '../../store/slices/networkSlice';
 import { fetchProjectNetwork, updateProjectNetwork } from '../../store/projectSlice';
+import { useLanguage } from '../../contexts/LanguageContext';
 import ReactFlow, {
   Node,
   Edge,
@@ -90,6 +91,7 @@ const defaultEdgeOptions = {
 };
 
 const NetworkEditor = () => {
+  const { t } = useLanguage();
   const dispatch = useDispatch<AppDispatch>();
   const navigate = useNavigate();
 
@@ -1776,7 +1778,7 @@ const NetworkEditor = () => {
         gap: 2
       }}>
         <Typography variant="h5" color="text.secondary">
-          プロジェクトが選択されていません
+          {t('network.title')}
         </Typography>
         <Typography variant="body1" color="text.secondary">
           プロジェクトタブからプロジェクトを選択してください
@@ -2128,7 +2130,7 @@ const NetworkEditor = () => {
 
               {activePanel === 'simulation' && (
                 <Box>
-                  <Typography variant="h6" gutterBottom>シミュレーション実行設定</Typography>
+                  <Typography variant="h6" gutterBottom>{t('network.simulation')}</Typography>
                   <TextField
                     label="実行時間 (分)"
                     type="number"

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLanguage } from '../../contexts/LanguageContext';
 import {
   Dialog,
   DialogTitle,
@@ -48,6 +49,7 @@ const StoreEditDialog: React.FC<StoreEditDialogProps> = ({
   nodeData,
   onSave,
 }) => {
+  const { t } = useLanguage();
   const [formData, setFormData] = useState<ProcessNodeData>({
     label: '',
     type: 'store',
@@ -196,9 +198,9 @@ const StoreEditDialog: React.FC<StoreEditDialogProps> = ({
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
       <DialogTitle>
         <Box display="flex" alignItems="center" gap={1}>
-          <Typography variant="h6">ストア設定</Typography>
+                     <Typography variant="h6">{t('store.title')}</Typography>
           <Chip
-            label={formData.storeType === 'finished_product' ? '完成品ストア' : '部品ストア'}
+                         label={formData.storeType === 'finished_product' ? t('store.finishedProductStore') : t('store.componentStore')}
             color={formData.storeType === 'finished_product' ? 'success' : 'warning'}
             size="small"
           />
@@ -209,33 +211,33 @@ const StoreEditDialog: React.FC<StoreEditDialogProps> = ({
         <Grid container spacing={3}>
           {/* 基本設定 */}
           <Grid item xs={12}>
-            <Typography variant="h6" gutterBottom>基本設定</Typography>
+                         <Typography variant="h6" gutterBottom>{t('process.basicSettings')}</Typography>
             <Grid container spacing={2}>
               <Grid item xs={6}>
                 <TextField
                   fullWidth
-                  label="ストア名"
+                  label={t('network.storeName')}
                   value={formData.label}
                   onChange={(e) => handleInputChange('label', e.target.value)}
                 />
               </Grid>
               <Grid item xs={6}>
                 <FormControl fullWidth>
-                  <InputLabel>ストアタイプ</InputLabel>
+                                     <InputLabel>{t('store.storeType')}</InputLabel>
                   <Select
                     value={formData.storeType}
                     onChange={(e) => handleInputChange('storeType', e.target.value)}
-                    label="ストアタイプ"
+                                         label={t('store.storeType')}
                   >
-                    <MenuItem value="finished_product">完成品ストア</MenuItem>
-                    <MenuItem value="component">部品ストア</MenuItem>
+                                         <MenuItem value="finished_product">{t('store.finishedProductStore')}</MenuItem>
+                     <MenuItem value="component">{t('store.componentStore')}</MenuItem>
                   </Select>
                 </FormControl>
               </Grid>
               <Grid item xs={6}>
                 <TextField
                   fullWidth
-                  label="入力バッファ容量"
+                                     label={t('store.inputBufferCapacity')}
                   type="number"
                   value={formData.inputBufferCapacity}
                   onChange={(e) => handleInputChange('inputBufferCapacity', parseInt(e.target.value))}
@@ -244,7 +246,7 @@ const StoreEditDialog: React.FC<StoreEditDialogProps> = ({
               <Grid item xs={6}>
                 <TextField
                   fullWidth
-                  label="出力バッファ容量"
+                                     label={t('store.outputBufferCapacity')}
                   type="number"
                   value={formData.outputBufferCapacity}
                   onChange={(e) => handleInputChange('outputBufferCapacity', parseInt(e.target.value))}
@@ -260,14 +262,14 @@ const StoreEditDialog: React.FC<StoreEditDialogProps> = ({
           {/* 生産計画 */}
           <Grid item xs={12}>
             <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-              <Typography variant="h6">生産計画</Typography>
+              <Typography variant="h6">{t('store.productionSchedule')}</Typography>
               <Button
                 variant="contained"
                 startIcon={<AddIcon />}
                 onClick={handleAddSchedule}
                 size="small"
               >
-                計画追加
+                                 {t('store.addSchedule')}
               </Button>
             </Box>
 
@@ -275,15 +277,15 @@ const StoreEditDialog: React.FC<StoreEditDialogProps> = ({
               <Table size="small">
                 <TableHead>
                   <TableRow>
-                    <TableCell>順序</TableCell>
-                    <TableCell>製品名</TableCell>
-                    <TableCell>数量</TableCell>
-                    <TableCell>単位</TableCell>
-                    <TableCell>優先度</TableCell>
-                    <TableCell>開始時刻</TableCell>
-                    <TableCell>終了時刻</TableCell>
-                    <TableCell>状態</TableCell>
-                    <TableCell>操作</TableCell>
+                                         <TableCell>{t('store.sequence')}</TableCell>
+                     <TableCell>{t('store.productName')}</TableCell>
+                     <TableCell>{t('store.quantity')}</TableCell>
+                     <TableCell>{t('store.unit')}</TableCell>
+                     <TableCell>{t('store.priority')}</TableCell>
+                     <TableCell>{t('store.startTime')}</TableCell>
+                     <TableCell>{t('store.endTime')}</TableCell>
+                     <TableCell>{t('store.status')}</TableCell>
+                     <TableCell>{t('store.actions')}</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -298,7 +300,7 @@ const StoreEditDialog: React.FC<StoreEditDialogProps> = ({
                       <TableCell>{schedule.endTime}</TableCell>
                       <TableCell>
                         <Chip
-                          label={schedule.isActive ? '有効' : '無効'}
+                          label={schedule.isActive ? t('store.active') : t('store.inactive')}
                           color={schedule.isActive ? 'success' : 'default'}
                           size="small"
                         />
@@ -328,14 +330,14 @@ const StoreEditDialog: React.FC<StoreEditDialogProps> = ({
           {/* 在庫レベル */}
           <Grid item xs={12}>
             <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-              <Typography variant="h6">在庫レベル</Typography>
+              <Typography variant="h6">{t('store.inventoryLevels')}</Typography>
               <Button
                 variant="contained"
                 startIcon={<AddIcon />}
                 onClick={handleAddInventory}
                 size="small"
               >
-                在庫追加
+                                 {t('store.addInventory')}
               </Button>
             </Box>
 
@@ -343,13 +345,13 @@ const StoreEditDialog: React.FC<StoreEditDialogProps> = ({
               <Table size="small">
                 <TableHead>
                   <TableRow>
-                    <TableCell>製品名</TableCell>
-                    <TableCell>現在在庫</TableCell>
-                    <TableCell>最小在庫</TableCell>
-                    <TableCell>最大在庫</TableCell>
-                    <TableCell>単位</TableCell>
-                    <TableCell>発注点</TableCell>
-                    <TableCell>操作</TableCell>
+                                         <TableCell>{t('store.productName')}</TableCell>
+                     <TableCell>{t('store.currentStock')}</TableCell>
+                     <TableCell>{t('store.minStock')}</TableCell>
+                     <TableCell>{t('store.maxStock')}</TableCell>
+                     <TableCell>{t('store.unit')}</TableCell>
+                     <TableCell>{t('store.reorderPoint')}</TableCell>
+                     <TableCell>{t('store.actions')}</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -566,10 +568,10 @@ const StoreEditDialog: React.FC<StoreEditDialogProps> = ({
       </DialogContent>
 
       <DialogActions>
-        <Button onClick={onClose}>キャンセル</Button>
-        <Button onClick={handleSave} variant="contained" startIcon={<SaveIcon />}>
-          保存
-        </Button>
+                 <Button onClick={onClose}>{t('common.cancel')}</Button>
+         <Button onClick={handleSave} variant="contained" startIcon={<SaveIcon />}>
+           {t('common.save')}
+         </Button>
       </DialogActions>
     </Dialog>
   );

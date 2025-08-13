@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLanguage } from '../../contexts/LanguageContext';
 import {
   Dialog,
   DialogTitle,
@@ -59,6 +60,7 @@ const ProcessEditDialog: React.FC<ProcessEditDialogProps> = ({
   onSave,
   products = [],
 }) => {
+  const { t } = useLanguage();
   console.log('ProcessEditDialog: Rendered with open =', open, 'and nodeData =', nodeData, 'and nodeId =', nodeId);
   const [tabValue, setTabValue] = useState(0);
   const [materialDialogOpen, setMaterialDialogOpen] = useState(false);
@@ -150,11 +152,11 @@ const ProcessEditDialog: React.FC<ProcessEditDialogProps> = ({
       <DialogTitle>工程パラメータ編集</DialogTitle>
       <DialogContent>
         <Tabs value={tabValue} onChange={(_, v) => setTabValue(v)}>
-          <Tab label="基本設定" />
-          <Tab label="リソース" />
-          <Tab label="品質・コスト" />
+                       <Tab label={t('process.basicSettings')} />
+                       <Tab label={t('process.advancedSettings')} />
+                       <Tab label={t('process.qualitySettings')} />
           <Tab 
-            label="材料設定" 
+                          label={t('process.materialSettings')} 
             icon={<MaterialIcon />}
             iconPosition="start"
           />
@@ -171,23 +173,23 @@ const ProcessEditDialog: React.FC<ProcessEditDialogProps> = ({
             <Grid item xs={12} md={6}>
               <TextField
                 fullWidth
-                label="工程名"
+                label={t('network.processName')}
                 value={editData.label}
                 onChange={handleChange('label')}
               />
             </Grid>
             <Grid item xs={12} md={6}>
               <FormControl fullWidth>
-                <InputLabel>工程タイプ</InputLabel>
+                <InputLabel>{t('network.processType')}</InputLabel>
                 <Select
                   value={editData.type}
                   onChange={handleSelectChange('type')}
-                  label="工程タイプ"
+                                      label={t('network.processType')}
                 >
-                  <MenuItem value="machining">機械加工</MenuItem>
-                  <MenuItem value="assembly">組立</MenuItem>
-                  <MenuItem value="inspection">検査</MenuItem>
-                  <MenuItem value="storage">保管</MenuItem>
+                                       <MenuItem value="machining">{t('process.machining')}</MenuItem>
+                  <MenuItem value="assembly">{t('process.assembly')}</MenuItem>
+                  <MenuItem value="inspection">{t('process.inspection')}</MenuItem>
+                  <MenuItem value="storage">{t('process.storage')}</MenuItem>
                   <MenuItem value="shipping">出荷</MenuItem>
                 </Select>
               </FormControl>
@@ -196,7 +198,7 @@ const ProcessEditDialog: React.FC<ProcessEditDialogProps> = ({
               <TextField
                 fullWidth
                 type="number"
-                label="サイクルタイム"
+                                   label={t('process.cycleTime')}
                 value={editData.cycleTime}
                 onChange={handleChange('cycleTime')}
                 InputProps={{
@@ -226,7 +228,7 @@ const ProcessEditDialog: React.FC<ProcessEditDialogProps> = ({
               <TextField
                 fullWidth
                 type="number"
-                label="設備台数"
+                                   label={t('process.equipmentCount')}
                 value={editData.equipmentCount}
                 onChange={handleChange('equipmentCount')}
                 inputProps={{ min: 1 }}
@@ -236,7 +238,7 @@ const ProcessEditDialog: React.FC<ProcessEditDialogProps> = ({
               <TextField
                 fullWidth
                 type="number"
-                label="作業者数"
+                                   label={t('process.operatorCount')}
                 value={editData.operatorCount}
                 onChange={handleChange('operatorCount')}
                 inputProps={{ min: 0 }}
@@ -252,7 +254,7 @@ const ProcessEditDialog: React.FC<ProcessEditDialogProps> = ({
               <TextField
                 fullWidth
                 type="number"
-                label="入力バッファ容量"
+                                   label={t('process.inputBufferCapacity')}
                 value={editData.inputBufferCapacity}
                 onChange={handleChange('inputBufferCapacity')}
                 inputProps={{ min: 0 }}
@@ -262,7 +264,7 @@ const ProcessEditDialog: React.FC<ProcessEditDialogProps> = ({
               <TextField
                 fullWidth
                 type="number"
-                label="出力バッファ容量"
+                                   label={t('process.outputBufferCapacity')}
                 value={editData.outputBufferCapacity}
                 onChange={handleChange('outputBufferCapacity')}
                 inputProps={{ min: 0 }}
@@ -274,7 +276,7 @@ const ProcessEditDialog: React.FC<ProcessEditDialogProps> = ({
         <TabPanel value={tabValue} index={2}>
           <Grid container spacing={2}>
             <Grid item xs={12}>
-              <Typography gutterBottom>不良率: {editData.defectRate}%</Typography>
+                               <Typography gutterBottom>{t('process.defectRate')}: {editData.defectRate}%</Typography>
               <Slider
                 value={editData.defectRate}
                 onChange={handleSliderChange('defectRate')}
@@ -290,7 +292,7 @@ const ProcessEditDialog: React.FC<ProcessEditDialogProps> = ({
               />
             </Grid>
             <Grid item xs={12}>
-              <Typography gutterBottom>手直し率: {editData.reworkRate}%</Typography>
+                               <Typography gutterBottom>{t('process.reworkRate')}: {editData.reworkRate}%</Typography>
               <Slider
                 value={editData.reworkRate}
                 onChange={handleSliderChange('reworkRate')}
@@ -309,7 +311,7 @@ const ProcessEditDialog: React.FC<ProcessEditDialogProps> = ({
               <TextField
                 fullWidth
                 type="number"
-                label="時間あたり運転コスト"
+                                   label={t('process.operatingCost')}
                 value={editData.operatingCost}
                 onChange={handleChange('operatingCost')}
                 InputProps={{

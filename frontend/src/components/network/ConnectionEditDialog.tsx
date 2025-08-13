@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useLanguage } from '../../contexts/LanguageContext';
 import {
   Dialog,
   DialogTitle,
@@ -75,6 +76,7 @@ const ConnectionEditDialog: React.FC<ConnectionEditDialogProps> = ({
   components = [],
   sourceProcessData,
 }) => {
+  const { t } = useLanguage();
   const [editData, setEditData] = useState<ConnectionData>({
     transportTime: 30,
     transportLotSize: 10,
