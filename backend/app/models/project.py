@@ -1,10 +1,8 @@
 from sqlalchemy import Column, String, DateTime, Text, JSON, Integer, Boolean, ForeignKey
-from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import uuid
-
-Base = declarative_base()
+from ..database import Base
 
 class Project(Base):
     __tablename__ = "projects"

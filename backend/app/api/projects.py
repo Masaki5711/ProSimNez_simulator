@@ -6,11 +6,10 @@ import json
 import uuid
 
 from ..database import get_db
-from ..models.project import Project, ProjectMember, ProjectNetworkData, ProjectHistory, ProjectSession
+from ..models.project import Project, ProjectMember, ProjectNetworkData, ProjectHistory
 from ..schemas.project import (
     ProjectCreate, ProjectUpdate, ProjectResponse, 
-    ProjectNetworkDataUpdate, ProjectMemberCreate,
-    ProjectSessionUpdate
+    ProjectNetworkDataUpdate, ProjectMemberCreate
 )
 
 router = APIRouter()

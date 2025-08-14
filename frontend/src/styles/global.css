@@ -1,0 +1,95 @@
+/* グローバルCSS設定 - ベンダープレフィックス警告の抑制 */
+
+/* 標準的なプレースホルダーのスタイル（古いMSプレフィックスを置き換え） */
+input::placeholder,
+textarea::placeholder {
+  color: #999;
+  opacity: 1;
+}
+
+/* 古いMS擬似要素の警告を抑制（コメントアウト） */
+/* input::-ms-input-placeholder,
+textarea::-ms-input-placeholder {
+  color: #999;
+  opacity: 1;
+}
+
+input:focus::-ms-input-placeholder,
+textarea:focus::-ms-input-placeholder {
+  color: #999;
+  opacity: 1;
+} */
+
+/* 標準的なtransformプロパティ（古いMozプレフィックスを置き換え） */
+.transform-element {
+  transform: translateX(0);
+  transition: transform 0.3s ease;
+}
+
+/* フォント表示の最適化（Firefoxの古いプロパティを置き換え） */
+body {
+  /* font-display: swap; 警告を避けるためコメントアウト */
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  /* -moz-osx-font-smoothing は削除され、標準的な手法を使用 */
+  font-feature-settings: "liga" 1, "kern" 1;
+}
+
+/* 古いMS擬似要素の代替 */
+input:focus,
+textarea:focus {
+  outline: 2px solid #1976d2;
+  outline-offset: 2px;
+}
+
+/* 古いベンダープレフィックスを避けた、標準的なフレックスボックス */
+.flex-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 古いWebKit box プロパティの代替 */
+.box-alignment {
+  display: flex;
+  align-items: center;
+}
+
+/* 古いWebKitプロパティの警告を抑制 */
+.webkit-box-fix {
+  display: flex;
+  align-items: center;
+}
+
+/* 古いMozプロパティの警告を抑制 */
+.moz-transform-fix {
+  transform: none;
+}
+
+/* font-displayプロパティの警告を抑制（コメントアウト） */
+/* .font-display-fix {
+  font-display: auto;
+} */
+
+/* CSS警告を減らすための追加設定 */
+* {
+  box-sizing: border-box;
+}
+
+/* 標準的なスクロールバースタイリング */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}

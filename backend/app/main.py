@@ -7,14 +7,20 @@ from typing import List
 import json
 
 # APIルーターのインポート
-from app.api import simulation, network, auth
+from app.api import simulation, network, auth, projects
 from app.api.simulation import get_simulation_engine
+from app.database import create_tables
 
 app = FastAPI(
     title="混流生産ライン離散シミュレーター",
     description="複雑な生産ネットワークのシミュレーションシステム",
     version="1.0.0"
 )
+
+# アプリケーション起動時にデータベーステーブルを作成
+@app.on_event("startup")
+async def startup_event():
+    create_tables()
 
 # CORS設定
 app.add_middleware(
@@ -111,6 +117,7 @@ async def websocket_endpoint(websocket: WebSocket):
 app.include_router(auth.router, prefix="/api/auth", tags=["authentication"])
 app.include_router(simulation.router, prefix="/api/simulation", tags=["simulation"])
 app.include_router(network.router, prefix="/api/network", tags=["network"])
+app.include_router(projects.router, prefix="/api/projects", tags=["projects"])
 
 if __name__ == "__main__":
     import uvicorn

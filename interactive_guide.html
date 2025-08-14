@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ProSimNez Simulator - インタラクティブガイド</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        body {
+            background-color: #f0f2f5;
+            color: #333;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 4rem 2rem;
+            text-align: center;
+            border-bottom-left-radius: 20px;
+            border-bottom-right-radius: 20px;
+        }
+        .header h1 {
+            font-weight: 700;
+            font-size: 3rem;
+        }
+        .section-title {
+            text-align: center;
+            margin-bottom: 3rem;
+            font-weight: 600;
+            position: relative;
+        }
+        .section-title::after {
+            content: '';
+            width: 80px;
+            height: 4px;
+            background: #764ba2;
+            position: absolute;
+            bottom: -10px;
+            left: 50%;
+            transform: translateX(-50%);
+            border-radius: 2px;
+        }
+        .card {
+            border: none;
+            border-radius: 15px;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        .card:hover {
+            transform: translateY(-10px);
+            box-shadow: 0 15px 30px rgba(0,0,0,0.15);
+        }
+        .accordion-button:not(.collapsed) {
+            color: #fff;
+            background-color: #764ba2;
+        }
+        .nav-tabs .nav-link {
+            color: #764ba2;
+        }
+        .nav-tabs .nav-link.active {
+            color: #495057;
+            background-color: #fff;
+            border-color: #dee2e6 #dee2e6 #fff;
+            font-weight: 600;
+        }
+        .tech-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            color: #667eea;
+        }
+        .demo-card {
+            background-color: #fff;
+        }
+        footer {
+            background-color: #343a40;
+            color: white;
+            padding: 2rem 0;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+    <header class="header">
+        <div class="container">
+            <h1>ProSimNez Simulator</h1>
+            <p class="lead">製造ラインの未来を可視化する、インタラクティブシミュレーター</p>
+        </div>
+    </header>
+
+    <div class="container my-5">
+        <!-- 概要セクション -->
+        <section id="overview" class="mb-5">
+            <h2 class="section-title">概要</h2>
+            <div class="row align-items-center">
+                <div class="col-md-6">
+                    <p><strong>ProSimNez Simulator</strong>は、複雑な製造プロセスやサプライチェーンをモデル化し、シミュレーションを通じてその挙動を分析・評価するためのWebアプリケーションです。</p>
+                    <p>GUIベースの直感的な操作で、誰でも簡単に生産ラインのボトルネック発見や、設備投資の効果測定、人員配置の最適化といった「What-If分析」を行えます。</p>
+                    <ul>
+                        <li><i class="fas fa-drafting-compass me-2 text-primary"></i>視覚的なネットワーク設計</li>
+                        <li><i class="fas fa-cogs me-2 text-primary"></i>リアルタイム・シミュレーション実行</li>
+                        <li><i class="fas fa-chart-pie me-2 text-primary"></i>多角的な結果分析とKPI可視化</li>
+                    </ul>
+                </div>
+                <div class="col-md-6">
+                    <div class="card p-3">
+                        <img src="UI.png" class="img-fluid rounded" alt="UI Screenshot">
+                        <small class="text-center mt-2 text-muted">シミュレーターのUI画面</small>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 技術スタックセクション -->
+        <section id="tech-stack" class="my-5">
+            <h2 class="section-title">技術スタック</h2>
+            <div class="accordion" id="techStackAccordion">
+                <div class="accordion-item card mb-3">
+                    <h2 class="accordion-header" id="headingOne">
+                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseOne" aria-expanded="false" aria-controls="collapseOne">
+                            <i class="fas fa-server me-3"></i><strong>バックエンド (Backend)</strong>
+                        </button>
+                    </h2>
+                    <div id="collapseOne" class="accordion-collapse collapse" aria-labelledby="headingOne" data-bs-parent="#techStackAccordion">
+                        <div class="accordion-body">
+                            <p>非同期処理を得意とするPythonのフレームワーク<strong>FastAPI</strong>をベースに構築されています。シミュレーションのコアエンジンには<strong>SimPy</strong>を採用し、複雑な離散イベントシミュレーションを効率的に実行します。</p>
+                            <ul>
+                                <li><strong>Webフレームワーク:</strong> FastAPI, Uvicorn</li>
+                                <li><strong>シミュレーション:</strong> SimPy</li>
+                                <li><strong>データベース (ORM):</strong> SQLAlchemy (PostgreSQL)</li>
+                                <li><strong>非同期タスク:</strong> Celery, Redis</li>
+                                <li><strong>リアルタイム通信:</strong> WebSockets</li>
+                                <li><strong>その他:</strong> Pandas, NumPy, Pydantic</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+                <div class="accordion-item card mb-3">
+                    <h2 class="accordion-header" id="headingTwo">
+                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseTwo" aria-expanded="false" aria-controls="collapseTwo">
+                            <i class="fas fa-desktop me-3"></i><strong>フロントエンド (Frontend)</strong>
+                        </button>
+                    </h2>
+                    <div id="collapseTwo" class="accordion-collapse collapse" aria-labelledby="headingTwo" data-bs-parent="#techStackAccordion">
+                        <div class="accordion-body">
+                            <p>モダンなUIを構築するためのライブラリ<strong>React</strong>と、静的型付けを導入する<strong>TypeScript</strong>を全面的に採用。状態管理には<strong>Redux Toolkit</strong>を使用し、大規模なアプリケーションでも予測可能で堅牢な状態管理を実現しています。</p>
+                            <ul>
+                                <li><strong>フレームワーク:</strong> React, TypeScript</li>
+                                <li><strong>状態管理:</strong> Redux Toolkit</li>
+                                <li><strong>UIコンポーネント:</strong> Material-UI (MUI)</li>
+                                <li><strong>ネットワーク描画:</strong> React Flow</li>
+                                <li><strong>API通信:</strong> Axios</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+                <div class="accordion-item card mb-3">
+                    <h2 class="accordion-header" id="headingThree">
+                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseThree" aria-expanded="false" aria-controls="collapseThree">
+                            <i class="fas fa-database me-3"></i><strong>インフラ (Infrastructure)</strong>
+                        </button>
+                    </h2>
+                    <div id="collapseThree" class="accordion-collapse collapse" aria-labelledby="headingThree" data-bs-parent="#techStackAccordion">
+                        <div class="accordion-body">
+                            <p><strong>Docker</strong>と<strong>Docker Compose</strong>を用いて、アプリケーション全体（バックエンド、フロントエンド、データベース）をコンテナ化しています。これにより、開発環境の構築が数コマンドで完了し、本番環境へのデプロイもスムーズに行えます。</p>
+                            <ul>
+                                <li><strong>コンテナ化:</strong> Docker, Docker Compose</li>
+                                <li><strong>データベース:</strong> PostgreSQL</li>
+                                <li><strong>タスクキュー:</strong> Redis</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 主な機能セクション -->
+        <section id="features" class="my-5">
+            <h2 class="section-title">主な機能</h2>
+            <div class="card p-4">
+                <ul class="nav nav-tabs" id="featureTab" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="network-tab" data-bs-toggle="tab" data-bs-target="#network" type="button" role="tab" aria-controls="network" aria-selected="true"><i class="fas fa-project-diagram me-2"></i>ネットワーク定義</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="simulation-tab" data-bs-toggle="tab" data-bs-target="#simulation" type="button" role="tab" aria-controls="simulation" aria-selected="false"><i class="fas fa-play-circle me-2"></i>シミュレーション実行</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="analysis-tab" data-bs-toggle="tab" data-bs-target="#analysis" type="button" role="tab" aria-controls="analysis" aria-selected="false"><i class="fas fa-chart-line me-2"></i>結果分析</button>
+                    </li>
+                </ul>
+                <div class="tab-content pt-4" id="featureTabContent">
+                    <div class="tab-pane fade show active" id="network" role="tabpanel" aria-labelledby="network-tab">
+                        <h4>ドラッグ＆ドロップで簡単設計</h4>
+                        <p>生産拠点、倉庫、輸送経路などをキャンバス上にドラッグ＆ドロップで配置し、視覚的に生産ラインを構築できます。各要素のパラメータ（処理時間、バッファ容量、輸送ロットサイズなど）もダイアログから簡単に設定可能です。</p>
+                    </div>
+                    <div class="tab-pane fade" id="simulation" role="tabpanel" aria-labelledby="simulation-tab">
+                        <h4>リアルタイムモニタリング</h4>
+                        <p>シミュレーションを開始すると、各工程の稼働状況、バッファの在庫量、搬送リソースの動きなどがリアルタイムでアニメーション表示されます。問題が発生している箇所を直感的に把握できます。</p>
+                    </div>
+                    <div class="tab-pane fade" id="analysis" role="tabpanel" aria-labelledby="analysis-tab">
+                        <h4>多角的なKPI分析</h4>
+                        <p>シミュレーション完了後、詳細な分析レポートが生成されます。スループット、リードタイム、設備稼働率、在庫推移などのKPIがグラフや表で可視化され、システムのパフォーマンスを定量的に評価できます。</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- インタラクティブデモセクション -->
+        <section id="demo" class="my-5">
+            <h2 class="section-title">ミニデモ：生産量予測</h2>
+            <div class="card p-4 demo-card">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h4>パラメータを入力してください</h4>
+                        <form id="demo-form">
+                            <div class="mb-3">
+                                <label for="cycleTime" class="form-label">サイクルタイム (秒/個)</label>
+                                <input type="number" class="form-control" id="cycleTime" value="60">
+                            </div>
+                            <div class="mb-3">
+                                <label for="equipmentCount" class="form-label">設備台数</label>
+                                <input type="number" class="form-control" id="equipmentCount" value="1">
+                            </div>
+                            <div class="mb-3">
+                                <label for="availability" class="form-label">設備稼働率 (%)</label>
+                                <input type="number" class="form-control" id="availability" value="90">
+                            </div>
+                            <button type="button" class="btn btn-primary w-100" onclick="calculateProduction()">生産量を計算</button>
+                        </form>
+                    </div>
+                    <div class="col-md-6 d-flex align-items-center justify-content-center flex-column">
+                        <h4>予測結果</h4>
+                        <div id="demo-result" class="text-center">
+                            <p class="fs-4">ここに計算結果が表示されます。</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </div>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2024 ProSimNez Simulator Project. All Rights Reserved.</p>
+            <a href="https://github.com/masaki5711-program/ProSimNez_simulator" class="text-white" target="_blank" rel="noopener noreferrer">
+                <i class="fab fa-github fa-2x"></i>
+            </a>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        function calculateProduction() {
+            const cycleTime = parseFloat(document.getElementById('cycleTime').value);
+            const equipmentCount = parseInt(document.getElementById('equipmentCount').value);
+            const availability = parseFloat(document.getElementById('availability').value) / 100;
+
+            if (isNaN(cycleTime) || isNaN(equipmentCount) || isNaN(availability) || cycleTime <= 0) {
+                document.getElementById('demo-result').innerHTML = `<p class="text-danger">有効な数値を入力してください。</p>`;
+                return;
+            }
+
+            const productionPerMinute = (60 / cycleTime) * equipmentCount * availability;
+            const productionPerHour = productionPerMinute * 60;
+            const productionPerDay = productionPerHour * 8; // 8時間稼働と仮定
+
+            const resultHTML = `
+                <div class="alert alert-success">
+                    <h4 class="alert-heading">計算結果</h4>
+                    <p><strong>1時間あたりの生産量:</strong> ${productionPerHour.toFixed(2)} 個</p>
+                    <hr>
+                    <p class="mb-0"><strong>1日(8h)あたりの生産量:</strong> ${productionPerDay.toFixed(2)} 個</p>
+                </div>
+            `;
+
+            document.getElementById('demo-result').innerHTML = resultHTML;
+        }
+    </script>
+</body>
+</html>
