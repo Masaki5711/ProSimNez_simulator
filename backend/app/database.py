@@ -54,3 +54,4 @@ def drop_tables():
     全テーブルを削除（開発時のみ使用）
     """
     Base.metadata.drop_all(bind=engine)
+

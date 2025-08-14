@@ -109,19 +109,31 @@ const ComponentEditorPage: React.FC = () => {
     if (selectedComponent?.id && components.length > 0) {
       const updatedComponent = components.find(c => c.id === selectedComponent.id);
       if (updatedComponent) {
-        // 実際に変更があった場合のみ更新（無限ループを防ぐ）
+        // BOM項目の詳細比較（配列の内容と長さを正確にチェック）
+        const currentBomIds = (selectedComponent.bomItems || []).map(item => item.id).sort();
+        const updatedBomIds = (updatedComponent.bomItems || []).map(item => item.id).sort();
+        const bomItemsChanged = 
+          currentBomIds.length !== updatedBomIds.length ||
+          currentBomIds.some((id, index) => id !== updatedBomIds[index]) ||
+          updatedComponent.updatedAt !== selectedComponent.updatedAt;
+        
         const hasChanges = 
           updatedComponent.name !== selectedComponent.name ||
           updatedComponent.code !== selectedComponent.code ||
           updatedComponent.type !== selectedComponent.type ||
           updatedComponent.unit !== selectedComponent.unit ||
-          (updatedComponent.bomItems?.length || 0) !== (selectedComponent.bomItems?.length || 0);
+          bomItemsChanged;
         
         console.log('選択中部品の更新チェック:', {
           selectedComponentId: selectedComponent.id,
           hasChanges,
+          bomItemsChanged,
           currentBomItemsCount: selectedComponent.bomItems?.length || 0,
           updatedBomItemsCount: updatedComponent.bomItems?.length || 0,
+          currentBomIds,
+          updatedBomIds,
+          currentUpdatedAt: selectedComponent.updatedAt,
+          newUpdatedAt: updatedComponent.updatedAt,
           currentBomItems: selectedComponent.bomItems,
           updatedBomItems: updatedComponent.bomItems
         });
@@ -130,25 +142,15 @@ const ComponentEditorPage: React.FC = () => {
           console.log('選択中部品に変更を検出、更新します:', {
             id: updatedComponent.id,
             name: updatedComponent.name,
-            bomItemsCount: updatedComponent.bomItems?.length || 0
+            bomItemsCount: updatedComponent.bomItems?.length || 0,
+            bomItems: updatedComponent.bomItems
           });
           
-          setSelectedComponent(prev => {
-            const newState = {
-              ...prev,
-              ...updatedComponent,
-              bomItems: updatedComponent.bomItems || []
-            };
-            console.log('選択中部品の状態更新:', {
-              prev: prev,
-              new: newState
-            });
-            return newState;
-          });
+          setSelectedComponent(updatedComponent);
         }
       }
     }
-  }, [components, selectedComponent?.id]); // selectedComponent.idのみを依存関係に含める
+  }, [components, selectedComponent?.id, selectedComponent?.updatedAt]); // updatedAtも依存関係に追加
 
   // 部品データの変更を監視（デバッグ用）
   useEffect(() => {
@@ -274,19 +276,37 @@ const ComponentEditorPage: React.FC = () => {
       
       // 保存成功後の処理
       if (result.payload) {
+        console.log('BOM項目保存成功 - payload:', result.payload);
+        
         // 成功メッセージを表示
         showSnackbar(editingBomItem.id ? 'BOM項目を更新しました' : 'BOM項目を追加しました');
         
-        // 部品データを再取得して最新の状態を保つ
+        // Redux storeの状態が更新されているはずなので、部品データ再取得は不要
+        // 代わりに、現在選択中の部品を更新された状態で再設定
+        const updatedComponent = components.find(c => c.id === selectedComponent.id);
+        if (updatedComponent) {
+          console.log('選択中部品を最新の状態に更新:', updatedComponent);
+          setSelectedComponent(updatedComponent);
+        }
+        
+        // 念のため、少し遅延してから部品データを再取得（最新の状態を確実にするため）
         if (currentProject?.id) {
-          // 少し遅延を入れてReduxの状態が安定してから再取得
           setTimeout(() => {
-            console.log('部品データ再取得開始');
+            console.log('部品データ再取得開始（念のため）');
             dispatch(fetchComponents(currentProject.id)).then((fetchResult) => {
               console.log('部品データ再取得完了:', fetchResult);
               console.log('再取得後の部品データ:', fetchResult.payload);
+              
+              // 再取得後に選択中部品も更新
+              if (selectedComponent?.id && fetchResult.payload?.components) {
+                const refreshedComponent = fetchResult.payload.components.find((c: Component) => c.id === selectedComponent.id);
+                if (refreshedComponent) {
+                  console.log('再取得後の選択中部品を設定:', refreshedComponent);
+                  setSelectedComponent(refreshedComponent);
+                }
+              }
             });
-          }, 100);
+          }, 200);
         }
       }
     }).catch((error) => {
@@ -759,26 +779,40 @@ const ComponentEditorPage: React.FC = () => {
                       <Typography variant="caption" color="textSecondary">
                         デバッグ情報: BOM項目数: {selectedComponent.bomItems?.length || 0} | 
                         部品ID: {selectedComponent.id} | 
-                        最終更新: {new Date().toLocaleTimeString()} | 
+                        最終更新: {selectedComponent.updatedAt || 'N/A'} | 
+                        現在時刻: {new Date().toLocaleTimeString()} | 
                         全部品数: {components.length}
                       </Typography>
-                      {selectedComponent.bomItems && selectedComponent.bomItems.length > 0 && (
+                      {selectedComponent.bomItems && selectedComponent.bomItems.length > 0 ? (
                         <Box sx={{ mt: 1 }}>
                           <Typography variant="caption" color="textSecondary">
-                            登録済みBOM項目: {selectedComponent.bomItems.map(item => 
-                              `${item.childProductId}(${item.quantity}${item.unit})`
-                            ).join(', ')}
+                            登録済みBOM項目: 
+                          </Typography>
+                          {selectedComponent.bomItems.map((item, index) => {
+                            const childComponent = components.find(c => c.id === item.childProductId);
+                            return (
+                              <Box key={item.id || index} sx={{ ml: 1, mt: 0.5 }}>
+                                <Typography variant="caption" color="textSecondary">
+                                  {index + 1}. ID: {item.id} | 子部品: {item.childProductId} ({childComponent?.name || '不明'}) | 
+                                  数量: {item.quantity}{item.unit} | 位置: {item.position} | 
+                                  オプション: {item.isOptional ? 'Yes' : 'No'}
+                                </Typography>
+                              </Box>
+                            );
+                          })}
+                        </Box>
+                      ) : (
+                        <Box sx={{ mt: 1 }}>
+                          <Typography variant="caption" color="warning.main">
+                            BOM項目が登録されていません
                           </Typography>
                         </Box>
                       )}
                       <Box sx={{ mt: 1 }}>
                         <Typography variant="caption" color="textSecondary">
-                          選択中部品の詳細: {JSON.stringify({
-                            id: selectedComponent.id,
-                            name: selectedComponent.name,
-                            bomItemsCount: selectedComponent.bomItems?.length || 0,
-                            bomItems: selectedComponent.bomItems
-                          }, null, 2)}
+                          Redux Store確認: 部品数: {components.length} | 
+                          現在の部品: {components.find(c => c.id === selectedComponent.id)?.name || '見つからない'} | 
+                          Store内BOM数: {components.find(c => c.id === selectedComponent.id)?.bomItems?.length || 0}
                         </Typography>
                       </Box>
                     </Box>

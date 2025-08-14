@@ -1,0 +1,17 @@
+{
+  "1": {
+    "id": "1",
+    "name": "サンプルプロジェクト",
+    "description": "生産ライン設計のサンプルプロジェクトです",
+    "category": "manufacturing",
+    "tags": [
+      "サンプル",
+      "生産ライン"
+    ],
+    "status": "active",
+    "version": "1.0.0",
+    "createdBy": "system",
+    "createdAt": "2025-08-14T11:35:44.850109",
+    "updatedAt": "2025-08-14T11:35:59.044038"
+  }
+}

@@ -188,18 +188,30 @@ export const deleteCategory = createAsyncThunk(
 export const saveBOMItem = createAsyncThunk(
   'components/saveBOMItem',
   async ({ componentId, bomItem, projectId }: { componentId: string; bomItem: Partial<ComponentBOMItem>; projectId: string }) => {
+    console.log('saveBOMItem - 入力データ:', { componentId, bomItem, projectId });
+    
     // 実際のAPI呼び出しに置き換える
-    if (!bomItem.id) {
+    if (!bomItem.id || bomItem.id === '' || bomItem.id === 'undefined') {
       // 新規作成の場合はIDを生成
+      const newId = `bom_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const newBOMItem = {
+        ...bomItem,
+        id: newId,
+        parentProductId: componentId,
+        effectiveDate: bomItem.effectiveDate || new Date().toISOString(),
+      };
+      
+      console.log('新規BOM項目を生成:', newBOMItem);
+      
       return {
         componentId,
-        bomItem: {
-          ...bomItem,
-          id: Date.now().toString(),
-        },
+        bomItem: newBOMItem,
         projectId,
       };
     }
+    
+    // 更新の場合
+    console.log('BOM項目を更新:', bomItem);
     return { componentId, bomItem, projectId };
   }
  );
@@ -392,19 +404,34 @@ const componentSlice = createSlice({
         state.categories = state.categories.filter(c => c.id !== action.payload);
       })
       .addCase(saveBOMItem.fulfilled, (state, action) => {
+        console.log('saveBOMItem.fulfilled - action.payload:', action.payload);
         const { componentId, bomItem, projectId } = action.payload;
         const component = state.components.find(c => c.id === componentId);
+        
         if (component) {
-          if (bomItem.id) {
-            // 更新
+          console.log('対象部品が見つかりました:', component.id, component.name);
+          console.log('現在のBOM項目数:', component.bomItems.length);
+          console.log('追加するBOM項目:', bomItem);
+          
+          // 既存のBOM項目IDと重複しないかチェック
+          const existingBOMItem = component.bomItems.find(item => item.id === bomItem.id);
+          
+          if (existingBOMItem) {
+            // 更新処理
+            console.log('BOM項目を更新します:', bomItem.id);
             const bomItemIndex = component.bomItems.findIndex(item => item.id === bomItem.id);
             if (bomItemIndex !== -1) {
-              component.bomItems[bomItemIndex] = { ...component.bomItems[bomItemIndex], ...bomItem };
+              component.bomItems[bomItemIndex] = { 
+                ...component.bomItems[bomItemIndex], 
+                ...bomItem as ComponentBOMItem 
+              };
+              console.log('BOM項目更新完了:', component.bomItems[bomItemIndex]);
             }
           } else {
-            // 新規作成
+            // 新規作成処理
+            console.log('新しいBOM項目を追加します');
             const newBOMItem: ComponentBOMItem = {
-              id: Date.now().toString(),
+              id: bomItem.id || `bom_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
               parentProductId: componentId,
               childProductId: bomItem.childProductId || '',
               quantity: bomItem.quantity || 1,
@@ -416,17 +443,27 @@ const componentSlice = createSlice({
               alternativeProducts: bomItem.alternativeProducts || [],
               notes: bomItem.notes || '',
             };
+            
+            console.log('新規BOM項目:', newBOMItem);
             component.bomItems.push(newBOMItem);
+            console.log('追加後のBOM項目数:', component.bomItems.length);
+            console.log('追加後のBOM項目リスト:', component.bomItems);
           }
+          
           component.updatedAt = new Date().toISOString();
+          console.log('部品の更新時間を設定:', component.updatedAt);
+        } else {
+          console.error('対象部品が見つかりません:', componentId);
         }
         
         // ローカルストレージに保存（開発環境用）
         if (projectId) {
-          localStorage.setItem(`project_${projectId}_components`, JSON.stringify({
+          const saveData = {
             components: state.components,
             categories: state.categories
-          }));
+          };
+          localStorage.setItem(`project_${projectId}_components`, JSON.stringify(saveData));
+          console.log('ローカルストレージに保存完了:', saveData);
         }
       })
       .addCase(deleteBOMItem.fulfilled, (state, action) => {
