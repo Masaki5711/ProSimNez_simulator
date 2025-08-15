@@ -10,7 +10,7 @@ from datetime import datetime
 # APIルーターのインポート
 from app.api import simulation, network, auth, projects
 from app.api.simulation import get_simulation_engine
-from app.api import integration_api, project_management_api, websocket_api, fact_checker_api
+from app.api import integration_api, project_management_api, websocket_api, fact_checker_api, test_simulation, project_info
 from app.database import create_tables
 
 app = FastAPI(
@@ -159,6 +159,8 @@ app.include_router(integration_api.router, prefix="/api/integration", tags=["int
 app.include_router(project_management_api.router, prefix="/api/project-management", tags=["project-management"])
 app.include_router(websocket_api.router, prefix="/api/websocket", tags=["websocket"])
 app.include_router(fact_checker_api.router, prefix="/api/fact-check", tags=["fact-check"])
+app.include_router(test_simulation.router, prefix="/api/test", tags=["test-simulation"])
+app.include_router(project_info.router, prefix="/api", tags=["project-info"])
 
 if __name__ == "__main__":
     import uvicorn

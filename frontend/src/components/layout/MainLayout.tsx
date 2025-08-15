@@ -24,6 +24,7 @@ import {
   Help as HelpIcon,
   Build as ComponentIcon,
   DragIndicator as DragIcon,
+  Science as TestIcon,
 } from '@mui/icons-material';
 import ConnectionStatus from '../status/ConnectionStatus';
 import SettingsPanel from './SettingsPanel';
@@ -72,6 +73,7 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
     { text: t('sidebar.networkEditor'), icon: <NetworkIcon />, path: '/network-editor' },
     { text: t('sidebar.componentEditor'), icon: <ComponentIcon />, path: '/component-editor' },
     { text: t('sidebar.analytics'), icon: <AnalyticsIcon />, path: '/analytics' },
+    { text: 'フェーズ2テスト', icon: <TestIcon />, path: '/phase2-test' },
     { text: t('sidebar.help'), icon: <HelpIcon />, path: '/help' },
   ];
 

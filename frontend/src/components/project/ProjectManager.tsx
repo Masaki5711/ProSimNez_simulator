@@ -61,6 +61,7 @@ import {
   Group as GroupIcon,
 } from '@mui/icons-material';
 import { Project, ProjectFilter, ProjectTemplate } from '../../types/projectTypes';
+import { resetProjectData, checkProjectData } from '../../utils/projectDataReset';
 import { RootState } from '../../store';
 import {
   fetchProjects,
@@ -133,8 +134,32 @@ const ProjectManager: React.FC<ProjectManagerProps> = ({
     dispatch(fetchProjects());
   }, [dispatch]);
 
+  // 型ガード関数
+  const isProject = (item: unknown): item is Project => {
+    if (!item || typeof item !== 'object') return false;
+    const obj = item as Record<string, unknown>;
+    return (
+      typeof obj.id === 'string' &&
+      typeof obj.name === 'string' &&
+      typeof obj.description === 'string' &&
+      typeof obj.status === 'string' &&
+      typeof obj.category === 'string' &&
+      Array.isArray(obj.tags)
+    );
+  };
+
+  // プロジェクトデータを配列に変換（型安全性を確保）
+  const projectsArray: Project[] = React.useMemo(() => {
+    if (Array.isArray(projects)) {
+      return projects;
+    }
+    // オブジェクト形式の場合は配列に変換
+    const values = Object.values(projects || {});
+    return values.filter(isProject);
+  }, [projects]);
+
   // フィルタリングとソート
-  const filteredProjects = projects.filter(project => {
+  const filteredProjects = projectsArray.filter((project: Project) => {
     // 検索語によるフィルタリング
     if (searchTerm && !project.name.toLowerCase().includes(searchTerm.toLowerCase()) &&
         !project.description.toLowerCase().includes(searchTerm.toLowerCase())) {
@@ -158,7 +183,7 @@ const ProjectManager: React.FC<ProjectManagerProps> = ({
     }
 
     return true;
-  }).sort((a, b) => {
+  }).sort((a: Project, b: Project) => {
     let aValue: any, bValue: any;
     
     switch (sortBy) {
@@ -167,20 +192,20 @@ const ProjectManager: React.FC<ProjectManagerProps> = ({
         bValue = b.name;
         break;
       case 'createdAt':
-        aValue = a.createdAt;
-        bValue = b.createdAt;
+        aValue = new Date(a.createdAt).getTime();
+        bValue = new Date(b.createdAt).getTime();
         break;
       case 'updatedAt':
-        aValue = a.updatedAt;
-        bValue = b.updatedAt;
+        aValue = new Date(a.updatedAt).getTime();
+        bValue = new Date(b.updatedAt).getTime();
         break;
       case 'category':
         aValue = a.category;
         bValue = b.category;
         break;
       default:
-        aValue = a.updatedAt;
-        bValue = b.updatedAt;
+        aValue = new Date(a.updatedAt).getTime();
+        bValue = new Date(b.updatedAt).getTime();
     }
 
     if (sortOrder === 'asc') {
@@ -266,6 +291,27 @@ const ProjectManager: React.FC<ProjectManagerProps> = ({
     setSnackbarOpen(true);
   };
 
+  // デバッグ用：プロジェクトデータリセット
+  const handleResetProjectData = async () => {
+    try {
+      await resetProjectData();
+      // 少し待ってからfetchを実行
+      setTimeout(() => {
+        dispatch(fetchProjects());
+      }, 500);
+      showSnackbar('プロジェクトデータをリセットしました - コンソールログを確認してください');
+    } catch (error) {
+      console.error('Reset error:', error);
+      showSnackbar('リセットエラーが発生しました');
+    }
+  };
+
+  // デバッグ用：プロジェクトデータ確認
+  const handleCheckProjectData = () => {
+    checkProjectData();
+    showSnackbar('コンソールでプロジェクトデータを確認してください');
+  };
+
   // プロジェクト選択時の処理
   const handleProjectSelect = (project: Project) => {
     dispatch(setCurrentProject(project));
@@ -303,13 +349,53 @@ const ProjectManager: React.FC<ProjectManagerProps> = ({
           <Typography variant="h5" component="h2">
             プロジェクト管理
           </Typography>
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={() => setCreateDialogOpen(true)}
-          >
-            新規プロジェクト
-          </Button>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <Button
+              variant="contained"
+              startIcon={<AddIcon />}
+              onClick={() => setCreateDialogOpen(true)}
+            >
+              新規プロジェクト
+            </Button>
+            <Button
+              variant="outlined"
+              color="warning"
+              onClick={handleResetProjectData}
+              size="small"
+            >
+              データリセット
+            </Button>
+            <Button
+              variant="outlined"
+              color="info"
+              onClick={handleCheckProjectData}
+              size="small"
+            >
+              データ確認
+            </Button>
+            <Button
+              variant="outlined"
+              color="secondary"
+              onClick={() => {
+                // 強制的にlocalStorageから読み込み
+                const stored = localStorage.getItem('projects');
+                if (stored) {
+                  try {
+                    const projects = JSON.parse(stored);
+                    console.log('🔧 Force loading from localStorage:', projects);
+                    // Redux storeを直接更新
+                    // これは緊急手段です
+                    window.location.reload();
+                  } catch (error) {
+                    console.error('Parse error:', error);
+                  }
+                }
+              }}
+              size="small"
+            >
+              強制更新
+            </Button>
+          </Box>
         </Box>
 
         {/* 検索・フィルター */}
@@ -376,6 +462,19 @@ const ProjectManager: React.FC<ProjectManagerProps> = ({
         </Tabs>
       </Paper>
 
+      {/* デバッグ情報 */}
+      <Paper sx={{ p: 2, mb: 2, bgcolor: 'grey.50' }}>
+        <Typography variant="h6" gutterBottom>🔍 デバッグ情報</Typography>
+        <Typography variant="body2" component="div">
+          <strong>プロジェクト数:</strong> {projectsArray.length}<br/>
+          <strong>フィルター済み:</strong> {filteredProjects.length}<br/>
+          <strong>ローディング:</strong> {loading ? 'Yes' : 'No'}<br/>
+          <strong>エラー:</strong> {error || 'None'}<br/>
+          <strong>Redux projects:</strong> {Array.isArray(projects) ? `配列[${projects.length}]` : `オブジェクト[${Object.keys(projects || {}).length}]`}<br/>
+          <strong>localStorage:</strong> {localStorage.getItem('projects') ? 'あり' : 'なし'}
+        </Typography>
+      </Paper>
+
       {/* プロジェクト一覧 */}
       <Box sx={{ flexGrow: 1, overflow: 'auto' }}>
         {loading ? (
@@ -386,15 +485,38 @@ const ProjectManager: React.FC<ProjectManagerProps> = ({
           <Alert severity="error" sx={{ m: 2 }}>
             {error}
           </Alert>
+        ) : filteredProjects.length === 0 ? (
+          <Paper sx={{ p: 4, textAlign: 'center' }}>
+            <Typography variant="h6" gutterBottom>
+              📋 プロジェクトが見つかりません
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              デモファクトリーを復元するには「データリセット」ボタンをクリックしてください
+            </Typography>
+            <Button
+              variant="contained"
+              color="primary"
+              onClick={handleResetProjectData}
+              sx={{ mr: 1 }}
+            >
+              デモファクトリーを復元
+            </Button>
+            <Button
+              variant="outlined"
+              onClick={handleCheckProjectData}
+            >
+              データ状況確認
+            </Button>
+          </Paper>
         ) : (
           <Grid container spacing={2}>
             {filteredProjects
-              .filter(project => {
+              .filter((project: Project) => {
                 if (activeTab === 0) return project.status === 'active';
                 if (activeTab === 1) return project.status === 'archived';
                 return true; // テンプレートタブ
               })
-              .map((project) => (
+              .map((project: Project) => (
               <Grid item xs={12} sm={6} md={4} key={project.id}>
                                   <Card 
                     sx={{ 
@@ -441,7 +563,7 @@ const ProjectManager: React.FC<ProjectManagerProps> = ({
                     </Box>
 
                     <Box sx={{ display: 'flex', gap: 0.5, mb: 1, flexWrap: 'wrap' }}>
-                      {project.tags.slice(0, 3).map((tag, index) => (
+                      {project.tags.slice(0, 3).map((tag: string, index: number) => (
                         <Chip key={index} label={tag} size="small" />
                       ))}
                       {project.tags.length > 3 && (

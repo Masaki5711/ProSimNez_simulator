@@ -89,6 +89,18 @@ class Factory(BaseModel):
         # TODO: より高度な循環検出アルゴリズムの実装
         
         return errors
+    
+    def get_component_by_id(self, component_id: str):
+        """IDでコンポーネント（Process/Buffer）を取得"""
+        # プロセスから検索
+        if component_id in self.processes:
+            return self.processes[component_id]
+        
+        # バッファから検索
+        if component_id in self.buffers:
+            return self.buffers[component_id]
+        
+        return None
         
     def to_dict(self) -> Dict:
         """辞書形式に変換"""

@@ -10,6 +10,7 @@ import ComponentEditorPage from './pages/ComponentEditorPage';
 import AnalyticsPage from './pages/AnalyticsPage';
 import ProjectsPage from './pages/ProjectsPage';
 import HelpPage from './pages/HelpPage';
+import Phase2TestPage from './pages/Phase2TestPage';
 
 function App() {
   return (
@@ -24,6 +25,7 @@ function App() {
               <Route path="/network-editor" element={<NetworkEditorPage />} />
               <Route path="/component-editor" element={<ComponentEditorPage />} />
               <Route path="/analytics" element={<AnalyticsPage />} />
+              <Route path="/phase2-test" element={<Phase2TestPage />} />
               <Route path="/help" element={<HelpPage />} />
             </Routes>
           </MainLayout>

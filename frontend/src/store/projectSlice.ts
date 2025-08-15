@@ -52,7 +52,34 @@ export const fetchProjects = createAsyncThunk(
 
       const response = await fetch(`/api/projects?${queryParams}`);
       if (!response.ok) throw new Error('Failed to fetch projects');
-      return await response.json();
+      const data = await response.json();
+      
+      console.log('🔍 API Response:', data);
+      
+      // オブジェクト形式の場合は配列に変換
+      if (data && typeof data === 'object' && !Array.isArray(data)) {
+        const projects = Object.values(data);
+        console.log('🔍 Converted to array:', projects);
+        
+        // APIからのデータが空の場合はlocalStorageを使用
+        if (projects.length === 0) {
+          console.log('🔍 API data is empty, falling back to localStorage');
+          throw new Error('Empty API response, use localStorage');
+        }
+        
+        return projects;
+      }
+      
+      const result = Array.isArray(data) ? data : [];
+      console.log('🔍 Final result:', result);
+      
+      // 配列でも空の場合はlocalStorageフォールバック
+      if (result.length === 0) {
+        console.log('🔍 API result is empty, falling back to localStorage');
+        throw new Error('Empty API response, use localStorage');
+      }
+      
+      return result;
     } catch (error) {
       // APIが利用できない場合はlocalStorageを使用
       console.warn('API not available, using localStorage:', error);
@@ -63,15 +90,15 @@ export const fetchProjects = createAsyncThunk(
       if (projects.length === 0) {
         const defaultProject: Project = {
           id: '1',
-          name: 'サンプルプロジェクト',
-          description: '生産ライン設計のサンプルプロジェクトです',
+          name: 'デモファクトリー',
+          description: '完全な生産ラインを含むデモンストレーション用ファクトリーです。原材料から出荷まで7つの工程を含みます。',
           category: 'manufacturing',
-          tags: ['サンプル', '生産ライン'],
+          tags: ['デモ', '完全な生産ライン', 'シミュレーション対応'],
           status: 'active',
-          version: '1.0.0',
+          version: '2.0.0',
           createdBy: 'system',
-          createdAt: new Date(),
-          updatedAt: new Date(),
+          createdAt: new Date('2025-01-15T12:00:00.000Z'),
+          updatedAt: new Date('2025-01-15T12:00:00.000Z'),
         };
         projects.push(defaultProject);
         localStorage.setItem('projects', JSON.stringify(projects));
@@ -155,27 +182,39 @@ export const fetchProjectNetwork = createAsyncThunk(
   async (projectId: string) => {
     try {
       const response = await fetch(`/api/projects/${projectId}/network`);
-      if (!response.ok) throw new Error('Failed to fetch project network');
-      return await response.json();
+      if (!response.ok) throw new Error('Failed to fetch network data');
+      const data = await response.json();
+      
+      console.log('🔍 Network API Response:', data);
+      
+      // APIからのデータが空の場合はlocalStorageを使用
+      if (!data || !data.nodes || data.nodes.length === 0) {
+        console.log('🔍 Network API data is empty, falling back to localStorage');
+        throw new Error('Empty network API response, use localStorage');
+      }
+      
+      return data;
     } catch (error) {
       // APIが利用できない場合はlocalStorageを使用
-      console.warn('API not available, using localStorage for network data:', error);
+      console.warn('Network API not available, using localStorage:', error);
       
-      const networkData = JSON.parse(localStorage.getItem(`project_${projectId}_network`) || 'null');
+      const networkData = localStorage.getItem(`project_${projectId}_network`);
+      if (networkData) {
+        const parsed = JSON.parse(networkData);
+        console.log('🔍 Network data loaded from localStorage:', parsed);
+        return parsed;
+      }
       
-      // デフォルトネットワークデータ
-      const defaultNetwork = {
+      // フォールバック: 空のネットワークデータ
+      console.log('🔍 No network data found, returning empty structure');
+      return {
         nodes: [],
         edges: [],
         products: [],
         bom_items: [],
         variants: [],
-        process_advanced_data: {},
-        last_modified_by: 'current_user',
-        updated_at: new Date().toISOString()
+        process_advanced_data: {}
       };
-      
-      return networkData || defaultNetwork;
     }
   }
 );

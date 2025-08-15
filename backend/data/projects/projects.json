@@ -1,17 +1,25 @@
 {
   "1": {
     "id": "1",
-    "name": "サンプルプロジェクト",
-    "description": "生産ライン設計のサンプルプロジェクトです",
+    "name": "デモファクトリー",
+    "description": "完全な生産ラインを含むデモンストレーション用ファクトリーです。原材料から出荷まで7つの工程を含みます。",
     "category": "manufacturing",
     "tags": [
-      "サンプル",
-      "生産ライン"
+      "デモ",
+      "完全な生産ライン",
+      "シミュレーション対応"
     ],
     "status": "active",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "createdBy": "system",
-    "createdAt": "2025-08-14T11:35:44.850109",
-    "updatedAt": "2025-08-14T11:35:59.044038"
+    "createdAt": "2025-01-15T12:00:00.000000",
+    "updatedAt": "2025-01-15T12:00:00.000000",
+    "components": {
+      "processes": 3,
+      "buffers": 4,
+      "products": 1,
+      "total_nodes": 7
+    },
+    "simulation_ready": true
   }
 }

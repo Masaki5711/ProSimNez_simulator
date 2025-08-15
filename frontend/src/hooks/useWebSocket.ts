@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { useDispatch } from 'react-redux';
 import { setCurrentTime, startSimulation, stopSimulation } from '../store/slices/simulationSlice';
 import { updateInventory, updateEquipmentStatus, setKPIData, addAlert } from '../store/slices/monitoringSlice';
@@ -9,6 +9,7 @@ export const useWebSocket = () => {
   const dispatch = useDispatch();
   const ws = useRef<WebSocket | null>(null);
   const reconnectTimeout = useRef<NodeJS.Timeout | null>(null);
+  const [isConnected, setIsConnected] = useState(false);
 
   const connect = useCallback(() => {
     try {
@@ -16,7 +17,7 @@ export const useWebSocket = () => {
 
       ws.current.onopen = () => {
         console.log('WebSocket接続成功');
-        // WebSocket接続成功時の処理（isConnected状態は削除されたため、必要に応じて別の状態管理を検討）
+        setIsConnected(true);
         
         // 接続確認
         if (ws.current?.readyState === WebSocket.OPEN) {
@@ -88,6 +89,10 @@ export const useWebSocket = () => {
           case 'pong':
             console.log('Pong received');
             break;
+          
+          case 'connection_established':
+            console.log('WebSocket connection established');
+            break;
             
           default:
             console.log('Unknown message type:', message.type);
@@ -96,11 +101,12 @@ export const useWebSocket = () => {
 
       ws.current.onerror = (error) => {
         console.error('WebSocketエラー:', error);
+        setIsConnected(false);
       };
 
       ws.current.onclose = () => {
         console.log('WebSocket接続終了');
-        // WebSocket切断時の処理（isConnected状態は削除されたため、必要に応じて別の状態管理を検討）
+        setIsConnected(false);
         
         // 5秒後に再接続を試みる
         reconnectTimeout.current = setTimeout(() => {
@@ -110,7 +116,7 @@ export const useWebSocket = () => {
       };
     } catch (error) {
       console.error('WebSocket接続エラー:', error);
-      // WebSocket接続エラー時の処理（isConnected状態は削除されたため、必要に応じて別の状態管理を検討）
+      setIsConnected(false);
     }
   }, [dispatch]);
 
@@ -135,5 +141,5 @@ export const useWebSocket = () => {
     };
   }, [connect]);
 
-  return { sendMessage };
+  return { sendMessage, isConnected };
 };

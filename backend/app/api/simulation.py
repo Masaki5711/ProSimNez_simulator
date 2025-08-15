@@ -7,8 +7,10 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 import asyncio
 import json
+import uuid
 
 from app.core.simulator import SimulationEngine
+from app.core.master_simulator import MasterSimulator, SimulationConfig as MasterSimulationConfig, SimulationResults
 from app.models.factory import Factory
 from app.models.process import Process, Equipment
 from app.models.buffer import Buffer
@@ -19,6 +21,10 @@ router = APIRouter()
 # グローバルシミュレーションエンジンインスタンス
 simulation_engine: Optional[SimulationEngine] = None
 simulation_task: Optional[asyncio.Task] = None
+
+# 新しいマスターシミュレータ
+master_simulator: Optional[MasterSimulator] = None
+simulation_results: Dict[str, SimulationResults] = {}
 
 class SimulationConfig(BaseModel):
     """シミュレーション設定"""
@@ -252,8 +258,200 @@ async def get_simulation_data():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"データ取得エラー: {str(e)}")
 
+# 新しいマスターシミュレータ用APIエンドポイント
+
+class MasterSimulationConfigRequest(BaseModel):
+    """マスターシミュレーション設定リクエスト"""
+    project_id: str = "1"  # プロジェクトID
+    name: str = "生産シミュレーション"
+    description: str = ""
+    duration_hours: float = 24.0
+    time_scale: float = 1.0
+    random_seed: Optional[int] = None
+    enable_detailed_process: bool = True
+    enable_material_flow: bool = True
+    enable_transport: bool = True
+    enable_quality: bool = True
+    enable_scheduling: bool = True
+    real_time_monitoring: bool = True
+
+@router.post("/master/start")
+async def start_master_simulation(config: MasterSimulationConfigRequest, background_tasks: BackgroundTasks):
+    """マスターシミュレーションを開始"""
+    global master_simulator
+    
+    try:
+        # 既存のシミュレーションが実行中の場合は停止
+        if master_simulator and master_simulator.is_running:
+            await master_simulator.stop_simulation()
+            
+        # プロジェクトデータからファクトリーを生成
+        from app.core.project_data_converter import convert_project_to_simulation_model
+        factory = await convert_project_to_simulation_model(config.project_id)
+        
+        # マスターシミュレータを初期化
+        master_simulator = MasterSimulator(factory)
+        
+        # シミュレーション設定を作成
+        simulation_config = MasterSimulationConfig(
+            simulation_id=str(uuid.uuid4()),
+            project_id=config.project_id,
+            name=config.name,
+            description=config.description,
+            duration_hours=config.duration_hours,
+            time_scale=config.time_scale,
+            random_seed=config.random_seed,
+            enable_detailed_process=config.enable_detailed_process,
+            enable_material_flow=config.enable_material_flow,
+            enable_transport=config.enable_transport,
+            enable_quality=config.enable_quality,
+            enable_scheduling=config.enable_scheduling,
+            real_time_monitoring=config.real_time_monitoring
+        )
+        
+        # シミュレーションを設定
+        await master_simulator.configure_simulation(simulation_config)
+        
+        # バックグラウンドでシミュレーションを開始
+        async def run_simulation():
+            try:
+                simulation_id = await master_simulator.start_simulation()
+                results = master_simulator.get_simulation_results()
+                if results:
+                    simulation_results[simulation_id] = results
+            except Exception as e:
+                print(f"シミュレーション実行エラー: {e}")
+                
+        background_tasks.add_task(run_simulation)
+        
+        return {
+            "simulation_id": simulation_config.simulation_id,
+            "project_id": config.project_id,
+            "status": "started",
+            "message": f"プロジェクト {config.project_id} のマスターシミュレーションを開始しました",
+            "config": simulation_config.__dict__
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"シミュレーション開始エラー: {str(e)}")
+
+@router.post("/master/pause")
+async def pause_master_simulation():
+    """マスターシミュレーションを一時停止"""
+    global master_simulator
+    
+    if not master_simulator:
+        raise HTTPException(status_code=404, detail="シミュレーションが見つかりません")
+        
+    if not master_simulator.is_running:
+        raise HTTPException(status_code=400, detail="シミュレーションが実行されていません")
+        
+    try:
+        await master_simulator.pause_simulation()
+        return {"status": "paused", "message": "シミュレーションを一時停止しました"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"一時停止エラー: {str(e)}")
+
+@router.post("/master/resume")
+async def resume_master_simulation():
+    """マスターシミュレーションを再開"""
+    global master_simulator
+    
+    if not master_simulator:
+        raise HTTPException(status_code=404, detail="シミュレーションが見つかりません")
+        
+    if not master_simulator.is_running:
+        raise HTTPException(status_code=400, detail="シミュレーションが実行されていません")
+        
+    try:
+        await master_simulator.resume_simulation()
+        return {"status": "resumed", "message": "シミュレーションを再開しました"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"再開エラー: {str(e)}")
+
+@router.post("/master/stop")
+async def stop_master_simulation():
+    """マスターシミュレーションを停止"""
+    global master_simulator
+    
+    if not master_simulator:
+        raise HTTPException(status_code=404, detail="シミュレーションが見つかりません")
+        
+    try:
+        await master_simulator.stop_simulation()
+        return {"status": "stopped", "message": "シミュレーションを停止しました"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"停止エラー: {str(e)}")
+
+@router.get("/master/status")
+async def get_master_simulation_status():
+    """マスターシミュレーション状況を取得"""
+    global master_simulator
+    
+    if not master_simulator:
+        return {"status": "not_initialized", "message": "シミュレーションが初期化されていません"}
+        
+    try:
+        status = master_simulator.get_simulation_status()
+        return {
+            "status": "active" if master_simulator.is_running else "stopped",
+            "details": status,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"状況取得エラー: {str(e)}")
+
+@router.get("/master/results/{simulation_id}")
+async def get_simulation_results(simulation_id: str):
+    """シミュレーション結果を取得"""
+    global simulation_results, master_simulator
+    
+    # 保存された結果から取得
+    if simulation_id in simulation_results:
+        results = simulation_results[simulation_id]
+        return {
+            "simulation_id": simulation_id,
+            "results": results.__dict__,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    # 現在実行中のシミュレーションの場合
+    if (master_simulator and master_simulator.config and 
+        master_simulator.config.simulation_id == simulation_id):
+        current_results = master_simulator.get_simulation_results()
+        if current_results:
+            return {
+                "simulation_id": simulation_id,
+                "results": current_results.__dict__,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+    raise HTTPException(status_code=404, detail="シミュレーション結果が見つかりません")
+
+@router.get("/master/kpis")
+async def get_current_kpis():
+    """現在のKPIを取得"""
+    global master_simulator
+    
+    if not master_simulator or not master_simulator.is_running:
+        raise HTTPException(status_code=404, detail="実行中のシミュレーションがありません")
+        
+    try:
+        kpis = master_simulator._collect_current_kpis()
+        return {
+            "kpis": kpis,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"KPI取得エラー: {str(e)}")
+
 # グローバルアクセス用関数
 def get_simulation_engine() -> Optional[SimulationEngine]:
     """現在のシミュレーションエンジンを取得"""
     global simulation_engine
     return simulation_engine
+
+def get_master_simulator() -> Optional[MasterSimulator]:
+    """現在のマスターシミュレータを取得"""
+    global master_simulator
+    return master_simulator
