@@ -34,6 +34,9 @@ class Factory(BaseModel):
     created_at: datetime = datetime.now()
     updated_at: datetime = datetime.now()
     
+    class Config:
+        arbitrary_types_allowed = True
+    
     def add_product(self, product: Product):
         """製品を追加"""
         self.products[product.id] = product

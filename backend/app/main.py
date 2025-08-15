@@ -5,10 +5,12 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List
 import json
+from datetime import datetime
 
 # APIルーターのインポート
 from app.api import simulation, network, auth, projects
 from app.api.simulation import get_simulation_engine
+from app.api import integration_api, project_management_api, websocket_api, fact_checker_api
 from app.database import create_tables
 
 app = FastAPI(
@@ -21,6 +23,17 @@ app = FastAPI(
 @app.on_event("startup")
 async def startup_event():
     create_tables()
+    # リアルタイムデータマネージャーを初期化
+    from app.api.websocket_api import realtime_manager
+    await realtime_manager.initialize()
+    print("リアルタイムデータマネージャーを初期化しました")
+
+@app.on_event("shutdown")  
+async def shutdown_event():
+    """アプリケーション終了時のクリーンアップ"""
+    from app.api.websocket_api import realtime_manager
+    await realtime_manager.shutdown()
+    print("リアルタイムデータマネージャーを終了しました")
 
 # CORS設定
 app.add_middleware(
@@ -69,11 +82,18 @@ async def root():
 async def health_check():
     return {"status": "healthy"}
 
-# WebSocketエンドポイント
+# WebSocketエンドポイント（後方互換性のため）
 @app.websocket("/ws/simulation")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
+        # 接続確認メッセージを送信
+        await manager.send_personal_message(json.dumps({
+            "type": "connection_established",
+            "message": "WebSocket接続が確立されました",
+            "timestamp": datetime.now().isoformat()
+        }), websocket)
+        
         while True:
             # クライアントからのメッセージを受信
             data = await websocket.receive_text()
@@ -110,7 +130,22 @@ async def websocket_endpoint(websocket: WebSocket):
                 # 接続確認
                 await manager.send_personal_message(json.dumps({"type": "pong"}), websocket)
                 
+            else:
+                # その他のメッセージタイプ
+                response = {"type": "message_received", "original_type": message.get("type", "unknown")}
+                await manager.send_personal_message(json.dumps(response), websocket)
+                
     except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception as e:
+        print(f"WebSocketエラー: {e}")
+        try:
+            await manager.send_personal_message(json.dumps({
+                "type": "error",
+                "message": f"サーバーエラー: {str(e)}"
+            }), websocket)
+        except:
+            pass
         manager.disconnect(websocket)
 
 # APIルーターの登録
@@ -118,6 +153,12 @@ app.include_router(auth.router, prefix="/api/auth", tags=["authentication"])
 app.include_router(simulation.router, prefix="/api/simulation", tags=["simulation"])
 app.include_router(network.router, prefix="/api/network", tags=["network"])
 app.include_router(projects.router, prefix="/api/projects", tags=["projects"])
+
+# 新しいAPIルーターの追加
+app.include_router(integration_api.router, prefix="/api/integration", tags=["integration"])
+app.include_router(project_management_api.router, prefix="/api/project-management", tags=["project-management"])
+app.include_router(websocket_api.router, prefix="/api/websocket", tags=["websocket"])
+app.include_router(fact_checker_api.router, prefix="/api/fact-check", tags=["fact-check"])
 
 if __name__ == "__main__":
     import uvicorn

@@ -22,6 +22,7 @@ alembic==1.12.1
 # 非同期処理
 celery==5.3.4
 redis==5.0.1
+aioredis==2.0.1
 
 # セキュリティ
 python-jose[cryptography]==3.3.0

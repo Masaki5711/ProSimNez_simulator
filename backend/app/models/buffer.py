@@ -21,7 +21,8 @@ class Buffer(BaseModel):
     id: str
     name: str
     capacity: Optional[int] = None  # None = 無制限
-    location_type: str  # "process_input", "process_output", "intermediate"
+    location_type: str = "intermediate"  # "process_input", "process_output", "intermediate"
+    buffer_type: str = "buffer"  # "input", "output", "buffer"
     
     # 在庫データ（メモリ内管理）
     inventory: Dict[str, List[Dict]] = {}  # product_id -> List of lots

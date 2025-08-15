@@ -14,9 +14,20 @@ class Product(BaseModel):
     """製品モデル"""
     id: str
     name: str
-    type: str  # "component", "subassembly", "finished_product"
+    code: str = ""
+    type: str = "component"  # "raw_material", "component", "sub_assembly", "finished_product"
+    version: str = "1.0"
+    description: str = ""
+    unit_cost: float = 0.0
+    lead_time: float = 0.0
+    supplier: str = ""
+    storage_conditions: str = ""
+    quality_grade: str = "A"
     bom: List[BOMItem] = []  # 必要部品リスト
     processing_time: float = 0.0  # 標準加工時間（秒）
+    
+    class Config:
+        arbitrary_types_allowed = True
     
 class Lot(BaseModel):
     """ロットモデル"""

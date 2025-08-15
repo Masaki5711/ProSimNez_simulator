@@ -52,6 +52,9 @@ class Process(BaseModel):
     input_buffer_id: Optional[str] = None
     output_buffer_id: Optional[str] = None
     
+    class Config:
+        arbitrary_types_allowed = True
+    
     def add_equipment(self, equipment: Equipment):
         """設備を追加"""
         self.equipments[equipment.id] = equipment
