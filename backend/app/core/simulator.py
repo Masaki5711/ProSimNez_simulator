@@ -44,7 +44,27 @@ class SimulationEngine:
             "equipment_states": [],
             "production_metrics": {},
             "performance_metrics": {},
-            "errors_and_warnings": []
+            "errors_and_warnings": [],
+            # 追加: より詳細なログ
+            "real_time_metrics": {
+                "current_time": [],
+                "production_progress": [],
+                "inventory_changes": [],
+                "equipment_utilization": [],
+                "throughput_rates": [],
+                "bottleneck_analysis": []
+            },
+            "system_health": {
+                "alerts": [],
+                "warnings": [],
+                "performance_degradations": []
+            },
+            "visualization_data": {
+                "timeline_events": [],
+                "process_flow_diagram": [],
+                "resource_utilization_chart": [],
+                "inventory_levels_chart": []
+            }
         }
         
     def add_event_listener(self, listener: Callable):
@@ -148,6 +168,202 @@ class SimulationEngine:
         
         self.phase2_test_log["process_states"].append(state_record)
         self.phase2_test_log["buffer_states"].append(state_record)
+        
+    def capture_real_time_metrics(self):
+        """リアルタイムメトリクスを収集"""
+        current_time = self.get_current_datetime()
+        sim_time = self.env.now
+        
+        # 現在時刻の記録
+        self.phase2_test_log["real_time_metrics"]["current_time"].append({
+            "timestamp": current_time.isoformat(),
+            "simulation_time": sim_time,
+            "formatted_time": current_time.strftime("%H:%M:%S")
+        })
+        
+        # 生産進捗の記録
+        total_production = 0
+        for buffer_id, buffer in self.factory.buffers.items():
+            if "FINAL" in buffer_id:
+                total_production += buffer.get_total_quantity()
+        
+        self.phase2_test_log["real_time_metrics"]["production_progress"].append({
+            "timestamp": current_time.isoformat(),
+            "simulation_time": sim_time,
+            "total_production": total_production,
+            "production_rate": total_production / max(1, sim_time / 3600)  # 時間あたり
+        })
+        
+        # 在庫変化の記録
+        inventory_summary = {}
+        for buffer_id, buffer in self.factory.buffers.items():
+            inventory_summary[buffer_id] = {
+                "name": buffer.name,
+                "current_stock": buffer.get_total_quantity(),
+                "capacity": buffer.capacity if hasattr(buffer, 'capacity') else 'unlimited'
+            }
+        
+        self.phase2_test_log["real_time_metrics"]["inventory_changes"].append({
+            "timestamp": current_time.isoformat(),
+            "simulation_time": sim_time,
+            "inventory_levels": inventory_summary
+        })
+        
+        # 設備稼働率の記録
+        equipment_utilization = {}
+        for process_id, process in self.factory.processes.items():
+            total_equipment = len(process.equipments)
+            running_equipment = sum(1 for eq in process.equipments.values() if eq.status == "running")
+            utilization_rate = (running_equipment / total_equipment * 100) if total_equipment > 0 else 0
+            
+            equipment_utilization[process_id] = {
+                "name": process.name,
+                "total_equipment": total_equipment,
+                "running_equipment": running_equipment,
+                "utilization_rate": round(utilization_rate, 1)
+            }
+        
+        self.phase2_test_log["real_time_metrics"]["equipment_utilization"].append({
+            "timestamp": current_time.isoformat(),
+            "simulation_time": sim_time,
+            "utilization_data": equipment_utilization
+        })
+        
+        # スループット率の記録
+        throughput_rates = {}
+        for process_id, process in self.factory.processes.items():
+            # 過去30分間の完了作業数を計算
+            recent_completions = sum(1 for event in self.phase2_test_log["detailed_events"] 
+                                   if event["process_id"] == process_id and 
+                                   event["event_type"] == "process_complete" and
+                                   event["simulation_time"] >= sim_time - 1800)  # 30分前から
+            
+            throughput_rates[process_id] = {
+                "name": process.name,
+                "completions_per_hour": recent_completions * 2,  # 30分間の2倍
+                "theoretical_capacity": 3600 / 60 if process.processing_time else 60  # 理論的能力
+            }
+        
+        self.phase2_test_log["real_time_metrics"]["throughput_rates"].append({
+            "timestamp": current_time.isoformat(),
+            "simulation_time": sim_time,
+            "throughput_data": throughput_rates
+        })
+        
+        # ボトルネック分析
+        bottleneck_analysis = self._identify_current_bottlenecks()
+        self.phase2_test_log["real_time_metrics"]["bottleneck_analysis"].append({
+            "timestamp": current_time.isoformat(),
+            "simulation_time": sim_time,
+            "bottlenecks": bottleneck_analysis
+        })
+        
+    def _identify_current_bottlenecks(self) -> list:
+        """現在のボトルネックを特定"""
+        bottlenecks = []
+        
+        for process_id, process in self.factory.processes.items():
+            # キュー長を計算
+            queue_length = len([event for event in self.phase2_test_log["detailed_events"] 
+                              if event["process_id"] == process_id and 
+                              event["event_type"] == "process_start" and
+                              event["simulation_time"] >= self.env.now - 300])  # 5分前から
+            
+            # 設備稼働率を計算
+            total_equipment = len(process.equipments)
+            running_equipment = sum(1 for eq in process.equipments.values() if eq.status == "running")
+            utilization_rate = (running_equipment / total_equipment * 100) if total_equipment > 0 else 0
+            
+            # ボトルネック判定
+            bottleneck_score = 0
+            if queue_length > 3:
+                bottleneck_score += 3
+            if utilization_rate > 80:
+                bottleneck_score += 2
+            if queue_length > 5:
+                bottleneck_score += 2
+            
+            if bottleneck_score >= 3:
+                bottlenecks.append({
+                    "process_id": process_id,
+                    "process_name": process.name,
+                    "bottleneck_score": bottleneck_score,
+                    "queue_length": queue_length,
+                    "utilization_rate": round(utilization_rate, 1),
+                    "severity": "high" if bottleneck_score >= 5 else "medium"
+                })
+        
+        # スコア順にソート
+        bottlenecks.sort(key=lambda x: x["bottleneck_score"], reverse=True)
+        return bottlenecks
+        
+    def analyze_system_health(self):
+        """システム健全性を分析"""
+        current_time = self.get_current_datetime()
+        sim_time = self.env.now
+        
+        # アラートの生成
+        alerts = []
+        warnings = []
+        performance_degradations = []
+        
+        # 在庫不足アラート
+        for buffer_id, buffer in self.factory.buffers.items():
+            current_stock = buffer.get_total_quantity()
+            if hasattr(buffer, 'capacity') and buffer.capacity != 'unlimited':
+                if current_stock < buffer.capacity * 0.1:  # 10%未満
+                    alerts.append({
+                        "type": "low_stock",
+                        "buffer_id": buffer_id,
+                        "buffer_name": buffer.name,
+                        "current_stock": current_stock,
+                        "capacity": buffer.capacity,
+                        "severity": "high"
+                    })
+        
+        # 設備故障警告
+        for process_id, process in self.factory.processes.items():
+            for eq_id, equipment in process.equipments.items():
+                if equipment.status == "breakdown":
+                    warnings.append({
+                        "type": "equipment_breakdown",
+                        "process_id": process_id,
+                        "equipment_id": eq_id,
+                        "severity": "medium"
+                    })
+        
+        # パフォーマンス劣化の検出
+        recent_events = [event for event in self.phase2_test_log["detailed_events"] 
+                        if event["simulation_time"] >= sim_time - 600]  # 10分前から
+        
+        if len(recent_events) < 5:  # イベント数が少ない
+            performance_degradations.append({
+                "type": "low_activity",
+                "description": "システム活動が低下しています",
+                "severity": "low"
+            })
+        
+        # 記録
+        if alerts:
+            self.phase2_test_log["system_health"]["alerts"].append({
+                "timestamp": current_time.isoformat(),
+                "simulation_time": sim_time,
+                "alerts": alerts
+            })
+        
+        if warnings:
+            self.phase2_test_log["system_health"]["warnings"].append({
+                "timestamp": current_time.isoformat(),
+                "simulation_time": sim_time,
+                "warnings": warnings
+            })
+        
+        if performance_degradations:
+            self.phase2_test_log["system_health"]["performance_degradations"].append({
+                "timestamp": current_time.isoformat(),
+                "simulation_time": sim_time,
+                "degradations": performance_degradations
+            })
                 
     def get_current_datetime(self) -> datetime:
         """現在のシミュレーション時刻を取得"""
@@ -216,6 +432,61 @@ class SimulationEngine:
         for process in self.factory.processes.values():
             self.run_process(process)
             
+        # テスト用の定期的なイベント生成を開始
+        self._schedule_test_events()
+        
+    def _schedule_test_events(self):
+        """テスト用の定期的なイベントをスケジュール"""
+        def generate_test_event():
+            if not self.is_running:
+                return
+                
+            # ランダムなテストイベントを生成
+            import random
+            event_types = [
+                "test_process_start",
+                "test_inventory_change", 
+                "test_equipment_status",
+                "test_quality_check",
+                "test_scheduling_update"
+            ]
+            
+            event_type = random.choice(event_types)
+            process_id = random.choice(list(self.factory.processes.keys())) if self.factory.processes else "TEST_PROCESS"
+            
+            test_event = SimulationEvent(
+                timestamp=self.get_current_datetime(),
+                event_type=event_type,
+                process_id=process_id,
+                data={
+                    "test_data": f"テストイベント {event_type}",
+                    "timestamp": self.env.now,
+                    "random_value": random.randint(1, 100)
+                }
+            )
+            
+            # イベントを記録
+            self.log_phase2_event(test_event)
+            
+            # 次のイベントをスケジュール（シミュレーション時間に応じて調整）
+            if self.env.now < 300:  # 5分未満
+                next_interval = random.randint(10, 30)
+            elif self.env.now < 1800:  # 30分未満
+                next_interval = random.randint(30, 60)
+            else:  # 30分以上
+                next_interval = random.randint(60, 120)
+            
+            self.env.process(self._delayed_event_generation(next_interval))
+        
+        # 最初のイベントをスケジュール
+        self.env.process(self._delayed_event_generation(5))
+        
+    def _delayed_event_generation(self, delay: float):
+        """遅延したイベント生成"""
+        yield self.env.timeout(delay)
+        if self.is_running:
+            self._schedule_test_events()
+            
     async def start(self, duration: Optional[float] = None):
         """シミュレーションを開始"""
         self.is_running = True
@@ -224,12 +495,26 @@ class SimulationEngine:
         # シミュレーションの初期化
         self.initialize_simulation()
         
+        # 初期イベントを生成
+        initial_event = SimulationEvent(
+            timestamp=self.get_current_datetime(),
+            event_type="simulation_start",
+            data={"message": "シミュレーション開始", "timestamp": self.env.now}
+        )
+        await self.notify_listeners(initial_event)
+        
         # シミュレーションループ
         try:
             last_broadcast = 0
             last_state_capture = 0
             broadcast_interval = 5  # 5秒ごとに状態をブロードキャスト
-            state_capture_interval = 30  # 30秒ごとにフェーズ２テスト用状態キャプチャ
+            # シミュレーション時間に応じて状態キャプチャ間隔を調整
+            if duration and duration > 600:  # 10分以上
+                state_capture_interval = 60  # 1分ごと
+            elif duration and duration > 300:  # 5分以上
+                state_capture_interval = 45  # 45秒ごと
+            else:
+                state_capture_interval = 30  # 30秒ごと
             
             while self.is_running:
                 if not self.is_paused:
@@ -248,6 +533,8 @@ class SimulationEngine:
                     # フェーズ２テスト用の定期的な状態キャプチャ
                     if self.env.now - last_state_capture >= state_capture_interval:
                         self.capture_system_state()
+                        self.capture_real_time_metrics()  # 追加: リアルタイムメトリクス
+                        self.analyze_system_health()      # 追加: システム健全性分析
                         last_state_capture = self.env.now
                     
                 # 速度調整
@@ -256,6 +543,15 @@ class SimulationEngine:
         except Exception as e:
             print(f"シミュレーションエラー: {e}")
         finally:
+            # 終了イベントを生成
+            if self.is_running:
+                end_event = SimulationEvent(
+                    timestamp=self.get_current_datetime(),
+                    event_type="simulation_end",
+                    data={"message": "シミュレーション終了", "timestamp": self.env.now}
+                )
+                await self.notify_listeners(end_event)
+            
             self.is_running = False
             
     async def pause(self):
@@ -356,52 +652,107 @@ class SimulationEngine:
         
     def end_phase2_test(self):
         """フェーズ２テスト終了時の処理"""
-        self.phase2_test_log["test_end_time"] = datetime.now().isoformat()
-        
-        # 最終パフォーマンスメトリクスを計算
-        self.phase2_test_log["performance_metrics"] = self.get_kpis()
-        
-        # 生産メトリクスを計算
-        total_events = len(self.phase2_test_log["detailed_events"])
-        process_events = sum(1 for event in self.phase2_test_log["detailed_events"] 
-                           if event["event_type"] in ["process_start", "process_complete"])
-        
-        self.phase2_test_log["production_metrics"] = {
-            "total_events": total_events,
-            "process_events": process_events,
-            "simulation_duration_seconds": self.env.now,
-            "simulation_duration_minutes": round(self.env.now / 60, 2),
-            "events_per_minute": round(total_events / (self.env.now / 60), 2) if self.env.now > 0 else 0
-        }
-        
-        print(f"✅ フェーズ２テスト終了: {self.phase2_test_log['test_end_time']}")
-        print(f"📊 総イベント数: {total_events}")
-        print(f"⏰ シミュレーション時間: {round(self.env.now / 60, 2)} 分")
+        try:
+            print(f"🔄 フェーズ２テスト終了処理開始...")
+            print(f"📊 現在のログ状態:")
+            print(f"   - 詳細イベント数: {len(self.phase2_test_log['detailed_events'])}")
+            print(f"   - リアルタイムメトリクス数: {len(self.phase2_test_log['real_time_metrics']['production_progress'])}")
+            print(f"   - システム健全性記録数: {len(self.phase2_test_log['system_health']['alerts'])}")
+            
+            self.phase2_test_log["test_end_time"] = datetime.now().isoformat()
+            
+            # 最終パフォーマンスメトリクスを計算
+            try:
+                self.phase2_test_log["performance_metrics"] = self.get_kpis()
+                print("✅ パフォーマンスメトリクス計算完了")
+            except Exception as kpi_error:
+                print(f"⚠️ KPI計算エラー: {str(kpi_error)}")
+                self.phase2_test_log["performance_metrics"] = {}
+            
+            # 生産メトリクスを計算
+            total_events = len(self.phase2_test_log["detailed_events"])
+            process_events = sum(1 for event in self.phase2_test_log["detailed_events"] 
+                               if event["event_type"] in ["process_start", "process_complete"])
+            
+            self.phase2_test_log["production_metrics"] = {
+                "total_events": total_events,
+                "process_events": process_events,
+                "simulation_duration_seconds": self.env.now,
+                "simulation_duration_minutes": round(self.env.now / 60, 2),
+                "events_per_minute": round(total_events / (self.env.now / 60), 2) if self.env.now > 0 else 0
+            }
+            
+            print(f"✅ フェーズ２テスト終了: {self.phase2_test_log['test_end_time']}")
+            print(f"📊 総イベント数: {total_events}")
+            print(f"⏰ シミュレーション時間: {round(self.env.now / 60, 2)} 分")
+            
+        except Exception as e:
+            print(f"❌ フェーズ２テスト終了処理エラー: {str(e)}")
+            raise
         
     def generate_phase2_test_report(self, output_dir: str = "reports") -> str:
         """フェーズ２テスト結果のMDレポートを生成"""
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
+        try:
+            print(f"🔄 レポート生成開始...")
+            print(f"📁 出力ディレクトリ: {output_dir}")
             
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"phase2_test_report_{timestamp}.md"
-        filepath = os.path.join(output_dir, filename)
-        
-        # MDコンテンツを生成
-        md_content = self._generate_md_content()
-        
-        # ファイルに書き込み
-        with open(filepath, 'w', encoding='utf-8') as f:
-            f.write(md_content)
+            if not os.path.exists(output_dir):
+                os.makedirs(output_dir)
+                print(f"✅ ディレクトリ作成: {output_dir}")
             
-        print(f"📄 フェーズ２テストレポートを生成しました: {filepath}")
-        return filepath
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"phase2_test_report_{timestamp}.md"
+            filepath = os.path.join(output_dir, filename)
+            
+            print(f"📝 ファイル名: {filename}")
+            print(f"📁 ファイルパス: {filepath}")
+            
+            # MDコンテンツを生成
+            try:
+                md_content = self._generate_md_content()
+                print(f"✅ MDコンテンツ生成完了: {len(md_content)} 文字")
+            except Exception as md_error:
+                print(f"❌ MDコンテンツ生成エラー: {str(md_error)}")
+                raise
+            
+            # ファイルに書き込み
+            try:
+                with open(filepath, 'w', encoding='utf-8') as f:
+                    f.write(md_content)
+                print(f"✅ MDファイル書き込み完了: {filepath}")
+            except Exception as write_error:
+                print(f"❌ ファイル書き込みエラー: {str(write_error)}")
+                raise
+            
+            # HTMLレポートも生成
+            try:
+                html_filepath = self._generate_html_report(output_dir, timestamp)
+                print(f"✅ HTMLレポート生成完了: {html_filepath}")
+            except Exception as html_error:
+                print(f"⚠️ HTMLレポート生成エラー: {str(html_error)}")
+                html_filepath = None
+            
+            print(f"📄 フェーズ２テストレポートを生成しました:")
+            print(f"   - Markdown: {filepath}")
+            print(f"   - HTML: {html_filepath}")
+            
+            return filepath
+            
+        except Exception as e:
+            print(f"❌ レポート生成全体エラー: {str(e)}")
+            print(f"📊 現在のログ状態:")
+            print(f"   - 詳細イベント数: {len(self.phase2_test_log['detailed_events'])}")
+            print(f"   - リアルタイムメトリクス数: {len(self.phase2_test_log['real_time_metrics']['production_progress'])}")
+            raise
         
     def _generate_md_content(self) -> str:
         """MDファイルのコンテンツを生成"""
-        log = self.phase2_test_log
-        
-        md_content = f"""# フェーズ２テスト実行レポート
+        try:
+            print(f"🔄 MDコンテンツ生成開始...")
+            log = self.phase2_test_log
+            
+            # 基本的なレポート内容を生成
+            md_content = f"""# フェーズ２テスト実行レポート
 
 ## 🔍 テスト概要
 
@@ -413,12 +764,106 @@ class SimulationEngine:
 | 総イベント数 | {log.get('production_metrics', {}).get('total_events', 0)} |
 | 工程イベント数 | {log.get('production_metrics', {}).get('process_events', 0)} |
 
+## 📊 ログ状態
+
+| 項目 | 値 |
+|------|------|
+| 詳細イベント数 | {len(log.get('detailed_events', []))} |
+| リアルタイムメトリクス数 | {len(log.get('real_time_metrics', {}).get('production_progress', []))} |
+| システム健全性記録数 | {len(log.get('system_health', {}).get('alerts', []))} |
+
 ## ⚙️ 設定情報
 
 ```json
 {json.dumps(log.get('configuration', {}), indent=2, ensure_ascii=False)}
 ```
 
+## 📋 詳細イベントログ
+
+### イベント統計
+"""
+            
+            print(f"✅ 基本MDコンテンツ生成完了")
+            
+            # 残りのコンテンツを追加
+            md_content += self._generate_remaining_md_content(log)
+            
+            return md_content
+            
+        except Exception as e:
+            print(f"❌ MDコンテンツ生成エラー: {str(e)}")
+            # エラー時は最小限のレポートを返す
+            return f"""# フェーズ２テスト実行レポート
+
+## ❌ エラーが発生しました
+
+レポート生成中にエラーが発生しました: {str(e)}
+
+## 📊 現在のログ状態
+
+- 詳細イベント数: {len(self.phase2_test_log.get('detailed_events', []))}
+- リアルタイムメトリクス数: {len(self.phase2_test_log.get('real_time_metrics', {}).get('production_progress', []))}
+"""
+        
+        # リアルタイムメトリクスの要約を追加
+        if log.get('real_time_metrics', {}).get('production_progress'):
+            latest_progress = log['real_time_metrics']['production_progress'][-1]
+            md_content += f"""
+- **最終生産数**: {latest_progress.get('total_production', 0)} 個
+- **生産率**: {latest_progress.get('production_rate', 0):.2f} 個/時間
+- **最終記録時刻**: {latest_progress.get('timestamp', 'N/A')[:19]}
+"""
+
+        # 設備稼働率の要約
+        if log.get('real_time_metrics', {}).get('equipment_utilization'):
+            latest_utilization = log['real_time_metrics']['equipment_utilization'][-1]
+            utilization_data = latest_utilization.get('utilization_data', {})
+            
+            md_content += "\n### 設備稼働率\n"
+            for process_id, data in utilization_data.items():
+                md_content += f"- **{data.get('name', process_id)}**: {data.get('utilization_rate', 0)}% ({data.get('running_equipment', 0)}/{data.get('total_equipment', 0)})\n"
+
+        # ボトルネック分析の要約
+        if log.get('real_time_metrics', {}).get('bottleneck_analysis'):
+            latest_bottlenecks = log['real_time_metrics']['bottleneck_analysis'][-1]
+            bottlenecks = latest_bottlenecks.get('bottlenecks', [])
+            
+            if bottlenecks:
+                md_content += "\n### 🚨 現在のボトルネック\n"
+                for bottleneck in bottlenecks[:3]:  # 上位3件
+                    severity_icon = "🔴" if bottleneck.get('severity') == 'high' else "🟡"
+                    md_content += f"{severity_icon} **{bottleneck.get('process_name', 'Unknown')}**\n"
+                    md_content += f"  - スコア: {bottleneck.get('bottleneck_score', 0)}\n"
+                    md_content += f"  - キュー長: {bottleneck.get('queue_length', 0)}\n"
+                    md_content += f"  - 稼働率: {bottleneck.get('utilization_rate', 0)}%\n"
+            else:
+                md_content += "\n### ✅ ボトルネックなし\n現在、ボトルネックは検出されていません。\n"
+
+        # システム健全性の要約
+        if log.get('system_health'):
+            md_content += "\n### 🏥 システム健全性\n"
+            
+            total_alerts = sum(len(health.get('alerts', [])) for health in log['system_health'].values())
+            total_warnings = sum(len(health.get('warnings', [])) for health in log['system_health'].values())
+            
+            if total_alerts > 0:
+                md_content += f"🔴 **アラート**: {total_alerts}件\n"
+            if total_warnings > 0:
+                md_content += f"🟡 **警告**: {total_warnings}件\n"
+            if total_alerts == 0 and total_warnings == 0:
+                md_content += "✅ **正常**: アラートや警告はありません\n"
+
+        md_content += "\n## 📋 詳細イベントログ\n\n### イベント統計\n"
+
+    def _generate_remaining_md_content(self, log: dict) -> str:
+        """残りのMDコンテンツを生成"""
+        try:
+            print(f"🔄 残りMDコンテンツ生成開始...")
+            
+            content = ""
+            
+            # パフォーマンスメトリクス
+            content += f"""
 ## 📊 パフォーマンスメトリクス
 
 | メトリクス | 値 |
@@ -435,20 +880,180 @@ class SimulationEngine:
 | 分あたりイベント数 | {log.get('production_metrics', {}).get('events_per_minute', 0)} |
 | シミュレーション効率 | {self._calculate_simulation_efficiency()}% |
 
-## 📋 詳細イベントログ
+## 📊 リアルタイムメトリクスサマリー
 
-### イベント統計
+### 生産進捗
+"""
+            
+            # リアルタイムメトリクスの要約を追加
+            real_time_metrics = log.get('real_time_metrics', {})
+            if real_time_metrics and isinstance(real_time_metrics, dict):
+                production_progress = real_time_metrics.get('production_progress', [])
+                if production_progress and len(production_progress) > 0:
+                    latest_progress = production_progress[-1]
+                    if isinstance(latest_progress, dict):
+                        content += f"""
+- **最終生産数**: {latest_progress.get('total_production', 0)} 個
+- **生産率**: {latest_progress.get('production_rate', 0):.2f} 個/時間
+- **最終記録時刻**: {latest_progress.get('timestamp', 'N/A')[:19]}
+"""
+                    else:
+                        content += "\n- **リアルタイムメトリクス**: データ形式エラー\n"
+                else:
+                    content += "\n- **リアルタイムメトリクス**: データなし\n"
+            else:
+                content += "\n- **リアルタイムメトリクス**: 利用不可\n"
+
+            # 設備稼働率の要約
+            if real_time_metrics and isinstance(real_time_metrics, dict):
+                equipment_utilization = real_time_metrics.get('equipment_utilization', [])
+                if equipment_utilization and len(equipment_utilization) > 0:
+                    latest_utilization = equipment_utilization[-1]
+                    if isinstance(latest_utilization, dict):
+                        utilization_data = latest_utilization.get('utilization_data', {})
+                        if utilization_data and isinstance(utilization_data, dict):
+                            content += "\n### 設備稼働率\n"
+                            for process_id, data in utilization_data.items():
+                                if isinstance(data, dict):
+                                    content += f"- **{data.get('name', process_id)}**: {data.get('utilization_rate', 0)}% ({data.get('running_equipment', 0)}/{data.get('total_equipment', 0)})\n"
+                                else:
+                                    content += f"- **{process_id}**: データ形式エラー\n"
+                        else:
+                            content += "\n### 設備稼働率\n- データなし\n"
+                    else:
+                        content += "\n### 設備稼働率\n- データ形式エラー\n"
+                else:
+                    content += "\n### 設備稼働率\n- データなし\n"
+            else:
+                content += "\n### 設備稼働率\n- 利用不可\n"
+
+            # ボトルネック分析の要約
+            if real_time_metrics and isinstance(real_time_metrics, dict):
+                bottleneck_analysis = real_time_metrics.get('bottleneck_analysis', [])
+                if bottleneck_analysis and len(bottleneck_analysis) > 0:
+                    latest_bottlenecks = bottleneck_analysis[-1]
+                    if isinstance(latest_bottlenecks, dict):
+                        bottlenecks = latest_bottlenecks.get('bottlenecks', [])
+                        if bottlenecks and isinstance(bottlenecks, list):
+                            content += "\n### 🚨 現在のボトルネック\n"
+                            for bottleneck in bottlenecks[:3]:  # 上位3件
+                                if isinstance(bottleneck, dict):
+                                    severity_icon = "🔴" if bottleneck.get('severity') == 'high' else "🟡"
+                                    content += f"{severity_icon} **{bottleneck.get('process_name', 'Unknown')}**\n"
+                                    content += f"  - スコア: {bottleneck.get('bottleneck_score', 0)}\n"
+                                    content += f"  - キュー長: {bottleneck.get('queue_length', 0)}\n"
+                                    content += f"  - 稼働率: {bottleneck.get('utilization_rate', 0)}%\n"
+                                else:
+                                    content += "- ボトルネックデータ形式エラー\n"
+                        else:
+                            content += "\n### ✅ ボトルネックなし\n現在、ボトルネックは検出されていません。\n"
+                    else:
+                        content += "\n### ボトルネック分析\n- データ形式エラー\n"
+                else:
+                    content += "\n### ボトルネック分析\n- データなし\n"
+            else:
+                content += "\n### ボトルネック分析\n- 利用不可\n"
+
+            # システム健全性の要約
+            system_health = log.get('system_health', {})
+            if system_health and isinstance(system_health, dict):
+                content += "\n### 🏥 システム健全性\n"
+                
+                try:
+                    total_alerts = sum(len(health.get('alerts', [])) for health in system_health.values() if isinstance(health, dict))
+                    total_warnings = sum(len(health.get('warnings', [])) for health in system_health.values() if isinstance(health, dict))
+                    
+                    if total_alerts > 0:
+                        content += f"🔴 **アラート**: {total_alerts}件\n"
+                    if total_warnings > 0:
+                        content += f"🟡 **警告**: {total_warnings}件\n"
+                    if total_alerts == 0 and total_warnings == 0:
+                        content += "✅ **正常**: アラートや警告はありません\n"
+                except Exception as health_error:
+                    content += f"⚠️ **システム健全性**: 計算エラー - {str(health_error)}\n"
+            else:
+                content += "\n### 🏥 システム健全性\n- データなし\n"
+
+            content += "\n## 📋 詳細イベントログ\n\n### イベント統計\n"
+
+            # イベントタイプ別の統計
+            event_types = {}
+            for event in log.get('detailed_events', []):
+                event_type = event.get('event_type', 'unknown')
+                event_types[event_type] = event_types.get(event_type, 0) + 1
+                
+            content += "\n| イベントタイプ | 回数 |\n|---------------|------|\n"
+            for event_type, count in sorted(event_types.items()):
+                content += f"| {event_type} | {count} |\n"
+
+            # 時系列イベント詳細
+            content += "\n### 時系列イベント詳細\n\n"
+            content += "| 時刻 | シミュレーション時間 | イベントタイプ | 説明 | 詳細データ |\n"
+            content += "|------|---------------------|----------------|------|------------|\n"
+            
+            for event in log.get('detailed_events', []):
+                timestamp = event.get('timestamp', '')[:19]  # 秒まで表示
+                sim_time = f"{event.get('simulation_time', 0):.1f}s"
+                event_type = event.get('event_type', '')
+                description = event.get('description', '')
+                data_str = str(event.get('data', {}))[:50] + "..." if len(str(event.get('data', {}))) > 50 else str(event.get('data', {}))
+                
+                content += f"| {timestamp} | {sim_time} | {event_type} | {description} | {data_str} |\n"
+
+            # システム状態の記録
+            content += "\n## 🏭 システム状態履歴\n\n"
+            
+            if log.get('process_states'):
+                content += "### 工程状態履歴\n\n"
+                for i, state in enumerate(log.get('process_states', [])[:5]):  # 最初の5つの状態のみ表示
+                    content += f"#### 状態記録 {i+1} ({state.get('timestamp', '')[:19]})\n\n"
+                    for process in state.get('process_states', []):
+                        content += f"**工程**: {process.get('process_name', '')} ({process.get('process_id', '')})\n"
+                        content += f"- タイプ: {process.get('process_type', '')}\n"
+                        for equipment in process.get('equipment_states', []):
+                            content += f"- 設備 {equipment.get('equipment_id', '')}: {equipment.get('status', '')} (稼働率: {equipment.get('utilization', 0)}%)\n"
+                        content += "\n"
+
+            if log.get('buffer_states'):
+                content += "### バッファ状態履歴\n\n"
+                for i, state in enumerate(log.get('buffer_states', [])[:5]):  # 最初の5つの状態のみ表示
+                    content += f"#### バッファ状態 {i+1} ({state.get('timestamp', '')[:19]})\n\n"
+                    for buffer in state.get('buffer_states', []):
+                        content += f"**バッファ**: {buffer.get('buffer_name', '')} ({buffer.get('buffer_id', '')})\n"
+                        content += f"- 容量: {buffer.get('capacity', 'unlimited')}\n"
+                        content += f"- 現在在庫: {buffer.get('current_stock', 0)}\n"
+                        content += f"- タイプ: {buffer.get('buffer_type', '')}\n\n"
+
+            # エラーと警告
+            if log.get('errors_and_warnings'):
+                content += "## ⚠️ エラーと警告\n\n"
+                for error in log.get('errors_and_warnings', []):
+                    content += f"- **{error.get('level', 'ERROR')}**: {error.get('message', '')}\n"
+            else:
+                content += "## ✅ エラーと警告\n\n"
+                content += "エラーや警告はありませんでした。\n"
+
+            # まとめ
+            content += f"""
+## 📋 テスト結果サマリー
+
+このフェーズ２テストでは、以下の結果が得られました：
+
+- **実行時間**: {log.get('production_metrics', {}).get('simulation_duration_minutes', 0)} 分
+- **総イベント数**: {log.get('production_metrics', {}).get('total_events', 0)}
+- **生産性**: {log.get('performance_metrics', {}).get('total_production', 0)} 製品
+- **システム効率**: {self._calculate_simulation_efficiency()}%
+
+---
+*レポート生成時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*
 """
 
-        # イベントタイプ別の統計
-        event_types = {}
-        for event in log.get('detailed_events', []):
-            event_type = event.get('event_type', 'unknown')
-            event_types[event_type] = event_types.get(event_type, 0) + 1
+            print(f"✅ 残りMDコンテンツ生成完了")
+            return content
             
-        md_content += "\n| イベントタイプ | 回数 |\n|---------------|------|\n"
-        for event_type, count in sorted(event_types.items()):
-            md_content += f"| {event_type} | {count} |\n"
+        except Exception as e:
+            print(f"❌ 残りMDコンテンツ生成エラー: {str(e)}")
+            return f"\n## ❌ コンテンツ生成エラー\n\nエラーが発生しました: {str(e)}\n"
 
         # 時系列イベント詳細
         md_content += "\n### 時系列イベント詳細\n\n"
@@ -513,6 +1118,312 @@ class SimulationEngine:
 """
 
         return md_content
+        
+    def _generate_html_report(self, output_dir: str, timestamp: str) -> str:
+        """HTML形式のビジュアルレポートを生成"""
+        log = self.phase2_test_log
+        
+        # HTMLテンプレート
+        html_content = f"""
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>フェーズ２テストレポート - {timestamp}</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }}
+        .container {{ max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
+        .header {{ text-align: center; margin-bottom: 30px; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 8px; }}
+        .metric-card {{ background: white; padding: 20px; margin: 15px 0; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); border-left: 4px solid #667eea; }}
+        .chart-container {{ position: relative; height: 400px; margin: 20px 0; }}
+        .status-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin: 20px 0; }}
+        .status-card {{ background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }}
+        .alert {{ border-left-color: #ff6b6b; }}
+        .warning {{ border-left-color: #ffd93d; }}
+        .success {{ border-left-color: #6bcf7f; }}
+        .bottleneck {{ border-left-color: #ff8e53; }}
+        .real-time {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 8px; margin: 20px 0; }}
+        .real-time h3 {{ margin-top: 0; }}
+        .metric-value {{ font-size: 2em; font-weight: bold; margin: 10px 0; }}
+        .progress-bar {{ width: 100%; height: 20px; background: #e0e0e0; border-radius: 10px; overflow: hidden; }}
+        .progress-fill {{ height: 100%; background: linear-gradient(90deg, #667eea, #764ba2); transition: width 0.3s ease; }}
+        .event-timeline {{ max-height: 400px; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 8px; padding: 20px; }}
+        .event-item {{ padding: 10px; margin: 5px 0; background: #f8f9fa; border-left: 3px solid #667eea; border-radius: 4px; }}
+        .event-time {{ color: #666; font-size: 0.9em; }}
+        .event-type {{ font-weight: bold; color: #333; }}
+        .event-desc {{ color: #555; margin-top: 5px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 フェーズ２テスト実行レポート</h1>
+            <p>生成時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+        </div>
+
+        <!-- リアルタイムメトリクス -->
+        <div class="real-time">
+            <h3>📊 リアルタイム状況</h3>
+            <div class="status-grid">
+"""
+        
+        # リアルタイムメトリクスを表示
+        if log.get('real_time_metrics', {}).get('production_progress'):
+            latest_progress = log['real_time_metrics']['production_progress'][-1]
+            html_content += f"""
+                <div class="status-card">
+                    <h4>🏭 生産進捗</h4>
+                    <div class="metric-value">{latest_progress.get('total_production', 0)}</div>
+                    <p>総生産数</p>
+                    <div class="metric-value">{latest_progress.get('production_rate', 0):.2f}</div>
+                    <p>生産率 (個/時間)</p>
+                </div>
+"""
+        
+        if log.get('real_time_metrics', {}).get('equipment_utilization'):
+            latest_utilization = log['real_time_metrics']['equipment_utilization'][-1]
+            for process_id, data in latest_utilization.get('utilization_data', {}).items():
+                utilization_rate = data.get('utilization_rate', 0)
+                html_content += f"""
+                <div class="status-card">
+                    <h4>⚙️ {data.get('name', process_id)}</h4>
+                    <div class="metric-value">{utilization_rate}%</div>
+                    <p>設備稼働率</p>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: {utilization_rate}%"></div>
+                    </div>
+                    <p>{data.get('running_equipment', 0)}/{data.get('total_equipment', 0)} 稼働中</p>
+                </div>
+"""
+        
+        html_content += """
+            </div>
+        </div>
+
+        <!-- ボトルネック分析 -->
+"""
+        
+        if log.get('real_time_metrics', {}).get('bottleneck_analysis'):
+            latest_bottlenecks = log['real_time_metrics']['bottleneck_analysis'][-1]
+            bottlenecks = latest_bottlenecks.get('bottlenecks', [])
+            
+            if bottlenecks:
+                html_content += """
+        <div class="metric-card bottleneck">
+            <h3>🚨 ボトルネック分析</h3>
+            <div class="status-grid">
+"""
+                for bottleneck in bottlenecks[:3]:
+                    severity_class = "alert" if bottleneck.get('severity') == 'high' else "warning"
+                    html_content += f"""
+                <div class="status-card {severity_class}">
+                    <h4>{bottleneck.get('process_name', 'Unknown')}</h4>
+                    <div class="metric-value">{bottleneck.get('bottleneck_score', 0)}</div>
+                    <p>ボトルネックスコア</p>
+                    <p>キュー長: {bottleneck.get('queue_length', 0)}</p>
+                    <p>稼働率: {bottleneck.get('utilization_rate', 0)}%</p>
+                </div>
+"""
+                html_content += """
+            </div>
+        </div>
+"""
+            else:
+                html_content += """
+        <div class="metric-card success">
+            <h3>✅ ボトルネックなし</h3>
+            <p>現在、ボトルネックは検出されていません。</p>
+        </div>
+"""
+        
+        # システム健全性
+        if log.get('system_health'):
+            html_content += """
+        <div class="metric-card">
+            <h3>🏥 システム健全性</h3>
+            <div class="status-grid">
+"""
+            
+            total_alerts = sum(len(health.get('alerts', [])) for health in log['system_health'].values())
+            total_warnings = sum(len(health.get('warnings', [])) for health in log['system_health'].values())
+            
+            if total_alerts > 0:
+                html_content += f"""
+                <div class="status-card alert">
+                    <h4>🔴 アラート</h4>
+                    <div class="metric-value">{total_alerts}</div>
+                    <p>件数</p>
+                </div>
+"""
+            if total_warnings > 0:
+                html_content += f"""
+                <div class="status-card warning">
+                    <h4>🟡 警告</h4>
+                    <div class="metric-value">{total_warnings}</div>
+                    <p>件数</p>
+                </div>
+"""
+            if total_alerts == 0 and total_warnings == 0:
+                html_content += """
+                <div class="status-card success">
+                    <h4>✅ 正常</h4>
+                    <p>アラートや警告はありません</p>
+                </div>
+"""
+            
+            html_content += """
+            </div>
+        </div>
+"""
+        
+        # チャート表示
+        html_content += """
+        <!-- チャート表示 -->
+        <div class="metric-card">
+            <h3>📈 生産進捗推移</h3>
+            <div class="chart-container">
+                <canvas id="productionChart"></canvas>
+            </div>
+        </div>
+
+        <div class="metric-card">
+            <h3>⚙️ 設備稼働率推移</h3>
+            <div class="chart-container">
+                <canvas id="utilizationChart"></canvas>
+            </div>
+        </div>
+
+        <!-- イベントタイムライン -->
+        <div class="metric-card">
+            <h3>📋 最新イベント</h3>
+            <div class="event-timeline">
+"""
+        
+        # 最新のイベントを表示
+        recent_events = log.get('detailed_events', [])[-20:]  # 最新20件
+        for event in reversed(recent_events):
+            timestamp = event.get('timestamp', '')[:19]
+            event_type = event.get('event_type', '')
+            description = event.get('description', '')
+            
+            html_content += f"""
+                <div class="event-item">
+                    <div class="event-time">{timestamp}</div>
+                    <div class="event-type">{event_type}</div>
+                    <div class="event-desc">{description}</div>
+                </div>
+"""
+        
+        # JavaScript for charts
+        html_content += """
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 生産進捗チャート
+        const productionCtx = document.getElementById('productionChart').getContext('2d');
+        new Chart(productionCtx, {
+            type: 'line',
+            data: {
+                labels: ["""
+        
+        # チャートデータを生成
+        if log.get('real_time_metrics', {}).get('production_progress'):
+            for progress in log['real_time_metrics']['production_progress']:
+                time_label = progress.get('timestamp', '')[:19]
+                html_content += f'"{time_label}", '
+        
+        html_content += """],
+                datasets: [{
+                    label: '総生産数',
+                    data: ["""
+        
+        if log.get('real_time_metrics', {}).get('production_progress'):
+            for progress in log['real_time_metrics']['production_progress']:
+                html_content += f"{progress.get('total_production', 0)}, "
+        
+        html_content += """],
+                    borderColor: '#667eea',
+                    backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                    tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+
+        // 設備稼働率チャート
+        const utilizationCtx = document.getElementById('utilizationChart').getContext('2d');
+        new Chart(utilizationCtx, {
+            type: 'line',
+            data: {
+                labels: ["""
+        
+        if log.get('real_time_metrics', {}).get('equipment_utilization'):
+            for utilization in log['real_time_metrics']['equipment_utilization']:
+                time_label = utilization.get('timestamp', '')[:19]
+                html_content += f'"{time_label}", '
+        
+        html_content += """],
+                datasets: ["""
+        
+        if log.get('real_time_metrics', {}).get('equipment_utilization'):
+            for i, (process_id, data) in enumerate(latest_utilization.get('utilization_data', {}).items()):
+                if i > 0:
+                    html_content += ","
+                color = f"hsl({(i * 137.5) % 360}, 70%, 50%)"
+                html_content += f"""
+                    {{
+                        label: '{data.get('name', process_id)}',
+                        data: ["""
+                
+                for utilization in log['real_time_metrics']['equipment_utilization']:
+                    util_data = utilization.get('utilization_data', {}).get(process_id, {})
+                    html_content += f"{util_data.get('utilization_rate', 0)}, "
+                
+                html_content += f"""],
+                        borderColor: '{color}',
+                        backgroundColor: '{color.replace(')', ', 0.1)')}',
+                        tension: 0.4
+                    }}"""
+        
+        html_content += """
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 100
+                    }
+                }
+            }
+        });
+    </script>
+</body>
+</html>
+"""
+        
+        # HTMLファイルを保存
+        html_filename = f"phase2_test_report_{timestamp}.html"
+        html_filepath = os.path.join(output_dir, html_filename)
+        
+        with open(html_filepath, 'w', encoding='utf-8') as f:
+            f.write(html_content)
+        
+        return html_filepath
         
     def _calculate_simulation_efficiency(self) -> float:
         """シミュレーション効率を計算"""

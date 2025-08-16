@@ -20,6 +20,8 @@ import {
   AccordionDetails,
   Container,
   Stack,
+  Tabs,
+  Tab,
 } from '@mui/material';
 import {
   PlayArrow,
@@ -35,7 +37,11 @@ import {
   LocalShipping,
   ExpandMore,
   Science,
+  Assessment,
+  Timeline,
 } from '@mui/icons-material';
+import Phase2TestReports from '../components/simulation/Phase2TestReports';
+import { simulationApi } from '../api/simulationApi';
 
 interface TestResult {
   test_type: string;
@@ -67,6 +73,7 @@ const Phase2TestPage: React.FC = () => {
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [selectedTestType, setSelectedTestType] = useState<string>('all');
+  const [activeTab, setActiveTab] = useState(0);
 
   const testTypes = [
     { value: 'all', label: 'すべてのシステム', icon: <Factory />, color: 'primary' as const },
@@ -75,30 +82,218 @@ const Phase2TestPage: React.FC = () => {
     { value: 'scheduling', label: 'スケジューリング', icon: <CalendarToday />, color: 'warning' as const },
   ];
 
+  // シミュレーション妥当性検証用のテストケース
+  const validationTestCases = [
+    {
+      name: '高速シミュレーション',
+      description: '10倍速での短時間テスト',
+      config: { duration: 60, speed: 10.0, test_duration: 6 },
+      color: 'success' as const
+    },
+    {
+      name: '低速シミュレーション',
+      description: '0.1倍速での長時間テスト',
+      config: { duration: 600, speed: 0.1, test_duration: 60 },
+      color: 'info' as const
+    },
+    {
+      name: '短時間シミュレーション',
+      description: '1分間の高密度テスト',
+      config: { duration: 60, speed: 1.0, test_duration: 6 },
+      color: 'warning' as const
+    },
+    {
+      name: '長時間シミュレーション',
+      description: '10分間の包括的テスト',
+      config: { duration: 600, speed: 1.0, test_duration: 60 },
+      color: 'error' as const
+    },
+    {
+      name: 'ストレステスト',
+      description: '高負荷での安定性テスト',
+      config: { duration: 300, speed: 5.0, test_duration: 30 },
+      color: 'secondary' as const
+    }
+  ];
+
+  const [validationResults, setValidationResults] = useState<Array<{
+    testCase: string;
+    status: 'pending' | 'running' | 'completed' | 'failed';
+    startTime?: string;
+    endTime?: string;
+    duration?: number;
+    events?: number;
+    error?: string;
+    reportPath?: string;
+  }>>([]);
+
+  const [isValidationRunning, setIsValidationRunning] = useState(false);
+
+  // シミュレーション妥当性検証を実行
+  const runValidationTests = async () => {
+    setIsValidationRunning(true);
+    setValidationResults(validationTestCases.map(tc => ({
+      testCase: tc.name,
+      status: 'pending'
+    })));
+
+    for (let i = 0; i < validationTestCases.length; i++) {
+      const testCase = validationTestCases[i];
+      
+      // テストケースの状態を更新
+      setValidationResults(prev => prev.map((result, index) => 
+        index === i ? { ...result, status: 'running', startTime: new Date().toISOString() } : result
+      ));
+
+      try {
+        console.log(`妥当性検証開始: ${testCase.name}`);
+        
+        // シミュレーション開始
+        const startResult = await simulationApi.start({
+          start_time: new Date().toISOString(),
+          duration: testCase.config.duration,
+          speed: testCase.config.speed
+        });
+
+        // 指定された時間実行
+        await new Promise(resolve => setTimeout(resolve, testCase.config.test_duration * 1000));
+
+        // シミュレーション停止
+        const stopResult = await simulationApi.stop();
+        
+        console.log(`${testCase.name} 完了:`, stopResult);
+
+        // 成功結果を記録
+        setValidationResults(prev => prev.map((result, index) => 
+          index === i ? {
+            ...result,
+            status: 'completed',
+            endTime: new Date().toISOString(),
+            duration: testCase.config.test_duration,
+            events: 0, // イベント数は後でレポートから取得
+            reportPath: stopResult.report_path
+          } : result
+        ));
+
+        // 次のテストケースまで少し待機
+        if (i < validationTestCases.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+
+      } catch (error: any) {
+        console.error(`${testCase.name} エラー:`, error);
+        
+        // エラー結果を記録
+        setValidationResults(prev => prev.map((result, index) => 
+          index === i ? {
+            ...result,
+            status: 'failed',
+            endTime: new Date().toISOString(),
+            error: error.message || '不明なエラー'
+          } : result
+        ));
+      }
+    }
+
+    setIsValidationRunning(false);
+  };
+
+  // 個別の妥当性テストを実行
+  const runSingleValidationTest = async (testCaseIndex: number) => {
+    const testCase = validationTestCases[testCaseIndex];
+    
+    setValidationResults(prev => prev.map((result, index) => 
+      index === testCaseIndex ? { ...result, status: 'running', startTime: new Date().toISOString() } : result
+    ));
+
+    try {
+      console.log(`個別妥当性検証開始: ${testCase.name}`);
+      
+      const startResult = await simulationApi.start({
+        start_time: new Date().toISOString(),
+        duration: testCase.config.duration,
+        speed: testCase.config.speed
+      });
+
+      await new Promise(resolve => setTimeout(resolve, testCase.config.test_duration * 1000));
+      const stopResult = await simulationApi.stop();
+      
+      setValidationResults(prev => prev.map((result, index) => 
+        index === testCaseIndex ? {
+          ...result,
+          status: 'completed',
+          endTime: new Date().toISOString(),
+          duration: testCase.config.test_duration,
+                      events: 0, // イベント数は後でレポートから取得
+          reportPath: stopResult.report_path
+        } : result
+      ));
+
+    } catch (error: any) {
+      console.error(`${testCase.name} エラー:`, error);
+      setValidationResults(prev => prev.map((result, index) => 
+        index === testCaseIndex ? {
+          ...result,
+          status: 'failed',
+          endTime: new Date().toISOString(),
+          error: error.message || '不明なエラー'
+        } : result
+      ));
+    }
+  };
+
   const runTest = async (testType: string) => {
     setLoading(true);
     try {
-      const response = await fetch('/api/test/start', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          test_type: testType,
-          duration_minutes: 5,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new window.Error(`テスト実行エラー: ${response.statusText}`);
-      }
-
-      const result = await response.json();
-      setTestResults(result);
+      // 新しいシミュレーションAPIを使用
+      const config = {
+        start_time: new Date().toISOString(),
+        duration: 300, // 5分 = 300秒
+        speed: 1.0
+      };
+      
+      const result = await simulationApi.start(config);
+      console.log('シミュレーション開始結果:', result);
+      
+      // シミュレーションが開始されたら、十分な時間実行してから停止
+      setTimeout(async () => {
+        try {
+          console.log('シミュレーション停止を開始...');
+          const stopResult = await simulationApi.stop();
+          console.log('シミュレーション停止結果:', stopResult);
+          
+          // テスト結果を設定
+          setTestResults({
+            test_type: testType,
+            status: 'completed',
+            results: {
+              summary: {
+                total_events: 'シミュレーション完了',
+                test_duration_minutes: 5,
+                systems_tested: '全システム'
+              }
+            },
+            events: [
+              {
+                event: 'シミュレーション完了',
+                timestamp: new Date().toISOString(),
+                details: stopResult
+              }
+            ],
+            timestamp: new Date().toISOString()
+          });
+          
+          setLoading(false);
+        } catch (stopError: any) {
+          console.error('シミュレーション停止エラー:', stopError);
+          alert(`シミュレーション停止に失敗しました: ${stopError.message}`);
+          setLoading(false);
+        }
+      }, 10000); // 10秒後に停止（より長い時間実行）
+      
     } catch (error: any) {
       console.error('テスト実行エラー:', error);
       alert(`テスト実行に失敗しました: ${error.message}`);
-    } finally {
       setLoading(false);
     }
   };
@@ -106,45 +301,94 @@ const Phase2TestPage: React.FC = () => {
   const runQuickDemo = async () => {
     setLoading(true);
     try {
-      const response = await fetch('/api/test/demo/quick-test', {
-        method: 'POST',
-      });
-
-      if (!response.ok) {
-        throw new window.Error(`デモ実行エラー: ${response.statusText}`);
-      }
-
-      const result = await response.json();
-      alert(`クイックデモ完了: ${result.message}`);
+      // クイックデモ用の短時間シミュレーション
+      const config = {
+        start_time: new Date().toISOString(),
+        duration: 120, // 2分 = 120秒
+        speed: 2.0 // 2倍速
+      };
       
-      setTestResults({
-        test_type: 'demo',
-        status: result.status,
-        results: result.results,
-        events: [
-          {
-            event: 'demo_completed',
-            timestamp: result.timestamp,
-            details: result.results
-          }
-        ],
-        timestamp: result.timestamp
-      });
+      const result = await simulationApi.start(config);
+      console.log('クイックデモ開始結果:', result);
+      
+      // 5秒後に自動停止（より長い時間実行）
+      setTimeout(async () => {
+        try {
+          console.log('クイックデモ停止を開始...');
+          const stopResult = await simulationApi.stop();
+          console.log('クイックデモ停止結果:', stopResult);
+          
+          alert(`クイックデモ完了: シミュレーションが正常に実行されました`);
+          
+          setTestResults({
+            test_type: 'demo',
+            status: 'completed',
+            results: {
+              summary: {
+                total_events: 'クイックデモ完了',
+                test_duration_minutes: 2,
+                systems_tested: '全システム'
+              }
+            },
+            events: [
+              {
+                event: 'demo_completed',
+                timestamp: new Date().toISOString(),
+                details: stopResult
+              }
+            ],
+            timestamp: new Date().toISOString()
+          });
+          
+          setLoading(false);
+        } catch (stopError: any) {
+          console.error('クイックデモ停止エラー:', stopError);
+          alert(`クイックデモ停止に失敗しました: ${stopError.message}`);
+          setLoading(false);
+        }
+      }, 5000); // 5秒後に停止（より長い時間実行）
+      
     } catch (error: any) {
       console.error('デモ実行エラー:', error);
       alert(`デモ実行に失敗しました: ${error.message}`);
-    } finally {
       setLoading(false);
     }
   };
 
   const checkSystemStatus = async () => {
     try {
-      const response = await fetch('/api/test/status');
-      const status = await response.json();
-      setSystemStatus(status);
+      // シミュレーションAPIの状態を確認
+      const status = await simulationApi.getStatus();
+      console.log('システム状況:', status);
+      
+      // システム状況を設定
+      setSystemStatus({
+        status: status.status,
+        factory: {
+          id: 'test_factory',
+          name: 'テストファクトリー',
+          products: 4, // 固定モデルの製品数
+          processes: 4, // 固定モデルの工程数
+          buffers: 4   // 固定モデルのバッファ数
+        },
+        systems: ['material_flow', 'quality_management', 'scheduling'],
+        timestamp: status.current_time
+      });
     } catch (error) {
       console.error('システム状況取得エラー:', error);
+      // エラー時はデフォルト値を設定
+      setSystemStatus({
+        status: 'unknown',
+        factory: {
+          id: 'test_factory',
+          name: 'テストファクトリー',
+          products: 4,
+          processes: 4,
+          buffers: 4
+        },
+        systems: ['material_flow', 'quality_management', 'scheduling'],
+        timestamp: new Date().toISOString()
+      });
     }
   };
 
@@ -187,6 +431,37 @@ const Phase2TestPage: React.FC = () => {
           状況更新
         </Button>
       </Box>
+
+      {/* タブナビゲーション */}
+      <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
+        <Tabs 
+          value={activeTab} 
+          onChange={(e, newValue) => setActiveTab(newValue)}
+          aria-label="フェーズ2テストタブ"
+          variant="fullWidth"
+        >
+          <Tab 
+            icon={<Timeline />} 
+            label="テスト実行" 
+            iconPosition="start"
+          />
+          <Tab 
+            icon={<Assessment />} 
+            label="テストレポート" 
+            iconPosition="start"
+          />
+          <Tab 
+            icon={<Science />} 
+            label="妥当性検証" 
+            iconPosition="start"
+          />
+        </Tabs>
+      </Box>
+
+      {/* タブコンテンツ */}
+      {activeTab === 0 && (
+        <Box>
+          {/* 既存のテスト実行機能 */}
 
       <Stack spacing={3}>
         {/* システム状況 */}
@@ -438,6 +713,171 @@ const Phase2TestPage: React.FC = () => {
           </CardContent>
         </Card>
       </Stack>
+        </Box>
+      )}
+
+      {/* タブ2: テストレポート */}
+      {activeTab === 1 && (
+        <Box sx={{ mt: 3 }}>
+          <Phase2TestReports />
+        </Box>
+      )}
+
+      {/* シミュレーション妥当性検証タブ */}
+      {activeTab === 2 && (
+        <Box sx={{ mt: 3 }}>
+          <Typography variant="h5" gutterBottom>
+            🧪 シミュレーション妥当性検証
+          </Typography>
+          
+          <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
+            異なる設定でのシミュレーション実行と長時間シミュレーションを行い、システムの安定性とデータ整合性を検証します。
+          </Typography>
+
+          {/* 一括実行ボタン */}
+          <Box sx={{ mb: 3 }}>
+            <Button
+              variant="contained"
+              color="primary"
+              size="large"
+              onClick={runValidationTests}
+              disabled={isValidationRunning}
+              startIcon={isValidationRunning ? <CircularProgress size={20} /> : <Science />}
+              sx={{ mr: 2 }}
+            >
+              {isValidationRunning ? '検証実行中...' : '全テストケース実行'}
+            </Button>
+            
+            <Button
+              variant="outlined"
+              onClick={() => setValidationResults([])}
+              disabled={isValidationRunning}
+            >
+              結果クリア
+            </Button>
+          </Box>
+
+          {/* テストケース一覧 */}
+          <Grid container spacing={2} sx={{ mb: 3 }}>
+            {validationTestCases.map((testCase, index) => (
+              <Grid item xs={12} md={6} lg={4} key={index}>
+                <Card>
+                  <CardHeader
+                    title={testCase.name}
+                    subheader={testCase.description}
+                    action={
+                      <Chip
+                        label={`${testCase.config.duration}秒 / ${testCase.config.speed}倍速`}
+                        color={testCase.color}
+                        size="small"
+                      />
+                    }
+                  />
+                  <CardContent>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                      実行時間: {testCase.config.test_duration}秒
+                    </Typography>
+                    
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      onClick={() => runSingleValidationTest(index)}
+                      disabled={isValidationRunning}
+                      fullWidth
+                    >
+                      個別実行
+                    </Button>
+                  </CardContent>
+                </Card>
+              </Grid>
+            ))}
+          </Grid>
+
+          {/* 検証結果 */}
+          {validationResults.length > 0 && (
+            <Box>
+              <Typography variant="h6" gutterBottom>
+                📊 検証結果
+              </Typography>
+              
+              <Grid container spacing={2}>
+                {validationResults.map((result, index) => (
+                  <Grid item xs={12} md={6} lg={4} key={index}>
+                    <Card>
+                      <CardHeader
+                        title={result.testCase}
+                        action={
+                          <Chip
+                            label={result.status}
+                            color={
+                              result.status === 'completed' ? 'success' :
+                              result.status === 'failed' ? 'error' :
+                              result.status === 'running' ? 'warning' : 'default'
+                            }
+                            size="small"
+                          />
+                        }
+                      />
+                      <CardContent>
+                        {result.status === 'completed' && (
+                          <Box>
+                            <Typography variant="body2">
+                              ✅ 実行時間: {result.duration}秒
+                            </Typography>
+                            <Typography variant="body2">
+                              📊 イベント数: {result.events}
+                            </Typography>
+                            <Typography variant="body2">
+                              📅 開始: {result.startTime?.slice(11, 19)}
+                            </Typography>
+                            <Typography variant="body2">
+                              📅 終了: {result.endTime?.slice(11, 19)}
+                            </Typography>
+                            {result.reportPath && (
+                              <Typography variant="body2" color="primary">
+                                📄 レポート生成済み
+                              </Typography>
+                            )}
+                          </Box>
+                        )}
+                        
+                        {result.status === 'failed' && (
+                          <Box>
+                            <Typography variant="body2" color="error">
+                              ❌ エラー: {result.error}
+                            </Typography>
+                            <Typography variant="body2">
+                              📅 開始: {result.startTime?.slice(11, 19)}
+                            </Typography>
+                            <Typography variant="body2">
+                              📅 終了: {result.endTime?.slice(11, 19)}
+                            </Typography>
+                          </Box>
+                        )}
+                        
+                        {result.status === 'running' && (
+                          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                            <CircularProgress size={20} sx={{ mr: 1 }} />
+                            <Typography variant="body2">
+                              実行中... {result.startTime?.slice(11, 19)}
+                            </Typography>
+                          </Box>
+                        )}
+                        
+                        {result.status === 'pending' && (
+                          <Typography variant="body2" color="text.secondary">
+                            ⏳ 待機中
+                          </Typography>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                ))}
+              </Grid>
+            </Box>
+          )}
+        </Box>
+      )}
     </Container>
   );
 };

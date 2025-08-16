@@ -24,7 +24,8 @@ import {
   Delete as DeleteIcon,
   Description as FileIcon,
   Refresh as RefreshIcon,
-  Info as InfoIcon
+  Info as InfoIcon,
+  Visibility as VisibilityIcon
 } from '@mui/icons-material';
 import { simulationApi, Phase2TestReport } from '../../api/simulationApi';
 
@@ -83,6 +84,13 @@ const Phase2TestReports: React.FC = () => {
     setDeleteDialogOpen(true);
   };
 
+  // HTMLレポート表示
+  const handleViewHtmlReport = (filename: string) => {
+    const htmlFilename = filename.replace('.md', '.html');
+    const reportUrl = `${process.env.REACT_APP_API_URL || 'http://localhost:8000'}/api/simulation/reports/download/${htmlFilename}`;
+    window.open(reportUrl, '_blank');
+  };
+
   // レポート削除実行
   const handleDeleteConfirm = async () => {
     if (!selectedReport) return;
@@ -139,7 +147,7 @@ const Phase2TestReports: React.FC = () => {
         </Box>
         <Typography variant="body2" color="text.secondary">
           フェーズ２テストは、シミュレーション実行時のすべてのイベントとシステム状態を詳細に記録し、
-          実行結果をMarkdownファイルとして自動生成します。レポートには以下の情報が含まれます：
+          実行結果をMarkdownファイルとHTMLファイルとして自動生成します。レポートには以下の情報が含まれます：
         </Typography>
         <Box sx={{ mt: 1, ml: 2 }}>
           <Typography variant="body2" color="text.secondary">
@@ -205,7 +213,7 @@ const Phase2TestReports: React.FC = () => {
                     }
                   />
                   <ListItemSecondaryAction>
-                    <Tooltip title="ダウンロード">
+                    <Tooltip title="Markdownダウンロード">
                       <IconButton
                         edge="end"
                         onClick={() => handleDownload(report)}
@@ -213,6 +221,16 @@ const Phase2TestReports: React.FC = () => {
                         sx={{ mr: 1 }}
                       >
                         <DownloadIcon />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="HTMLレポート表示">
+                      <IconButton
+                        edge="end"
+                        onClick={() => handleViewHtmlReport(report.filename)}
+                        color="secondary"
+                        sx={{ mr: 1 }}
+                      >
+                        <VisibilityIcon />
                       </IconButton>
                     </Tooltip>
                     <Tooltip title="削除">

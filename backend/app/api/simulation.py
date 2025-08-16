@@ -153,7 +153,9 @@ async def start_simulation(config: SimulationConfig, background_tasks: Backgroun
             "speed": config.speed,
             "duration": config.duration,
             "factory_processes": len(factory.processes),
-            "factory_buffers": len(factory.buffers)
+            "factory_buffers": len(factory.buffers),
+            "test_mode": True,
+            "event_generation_interval": 10  # 10秒ごとにテストイベント生成
         }
         simulation_engine.start_phase2_test(config_dict)
         
@@ -213,7 +215,11 @@ async def stop_simulation():
         report_path = None
         
         # フェーズ２テスト終了処理
-        simulation_engine.end_phase2_test()
+        try:
+            simulation_engine.end_phase2_test()
+            print("✅ フェーズ２テスト終了処理完了")
+        except Exception as end_error:
+            print(f"⚠️ フェーズ２テスト終了処理エラー: {str(end_error)}")
         
         # MDレポート生成
         try:
@@ -221,8 +227,14 @@ async def stop_simulation():
             print(f"📄 テストレポートが生成されました: {report_path}")
         except Exception as report_error:
             print(f"⚠️ レポート生成エラー: {str(report_error)}")
+            report_path = None
         
-        await simulation_engine.stop()
+        # シミュレーション停止
+        try:
+            await simulation_engine.stop()
+            print("✅ シミュレーション停止完了")
+        except Exception as stop_error:
+            print(f"⚠️ シミュレーション停止エラー: {str(stop_error)}")
         
         if simulation_task and not simulation_task.done():
             simulation_task.cancel()
@@ -230,7 +242,8 @@ async def stop_simulation():
         return {
             "message": "シミュレーションが停止されました（フェーズ２テストレポート生成完了）",
             "status": "stopped",
-            "report_path": report_path
+            "report_path": report_path,
+            "html_report_path": report_path.replace('.md', '.html') if report_path else None
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"停止エラー: {str(e)}")

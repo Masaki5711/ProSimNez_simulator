@@ -61,7 +61,7 @@ export const simulationApi = {
   },
 
   // シミュレーション停止
-  async stop() {
+  async stop(): Promise<{ message: string; status: string; report_path?: string; html_report_path?: string }> {
     const response = await api.post('/simulation/stop');
     return response.data;
   },
