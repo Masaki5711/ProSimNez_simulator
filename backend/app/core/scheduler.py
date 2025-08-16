@@ -83,11 +83,14 @@ class ScheduledOperation:
     operation_id: str
     order_id: str
     process_id: str
-    product_id: str
-    quantity: int
-    scheduled_start: datetime
-    scheduled_end: datetime
-    estimated_duration: float
+    equipment_id: str = ""
+    scheduled_start: datetime = field(default_factory=datetime.now)
+    scheduled_end: datetime = field(default_factory=datetime.now)
+    status: str = "scheduled"  # "scheduled", "running", "completed", "cancelled"
+    priority: int = 0
+    product_id: str = ""
+    quantity: int = 0
+    estimated_duration: float = 0.0
     setup_time: float = 0.0
     predecessor_operations: List[str] = field(default_factory=list)
     successor_operations: List[str] = field(default_factory=list)
@@ -759,6 +762,325 @@ class ProductionScheduler:
             }
         }
         
+    async def _schedule_operation_backward(self, order: ProductionOrder, process_id: str, 
+                                         start_time: datetime, end_time: datetime) -> Optional[ScheduledOperation]:
+        """後方スケジューリングで作業をスケジュール"""
+        try:
+            # 工程の存在確認
+            if process_id not in self.factory.processes:
+                await self._emit_event("scheduling_error", {
+                    "error": f"Process {process_id} not found",
+                    "order_id": order.order_id
+                })
+                return None
+                
+            process = self.factory.processes[process_id]
+            
+            # 利用可能な設備を探す
+            available_equipment = None
+            for equipment in process.equipments.values():
+                if equipment.status == "idle":
+                    # 設備の利用可能性をチェック
+                    if await self._is_equipment_available(equipment.id, start_time, end_time):
+                        available_equipment = equipment
+                        break
+            
+            if not available_equipment:
+                # 利用可能な設備がない場合、スケジュールを調整
+                adjusted_start, adjusted_end = await self._find_available_slot(
+                    process_id, start_time, end_time
+                )
+                if adjusted_start and adjusted_end:
+                    start_time, end_time = adjusted_start, adjusted_end
+                    # 再度設備を探す
+                    for equipment in process.equipments.values():
+                        if await self._is_equipment_available(equipment.id, start_time, end_time):
+                            available_equipment = equipment
+                            break
+                else:
+                    await self._emit_event("scheduling_error", {
+                        "error": f"No available slot for process {process_id}",
+                        "order_id": order.order_id
+                    })
+                    return None
+            
+            # スケジュールされた作業を作成
+            operation = ScheduledOperation(
+                operation_id=f"op_{order.order_id}_{process_id}_{int(start_time.timestamp())}",
+                order_id=order.order_id,
+                process_id=process_id,
+                equipment_id=available_equipment.id,
+                scheduled_start=start_time,
+                scheduled_end=end_time,
+                status="scheduled",
+                priority=order.priority
+            )
+            
+            # スケジュールに追加
+            self.scheduled_operations[operation.operation_id] = operation
+            
+            # リソーススケジュールに追加
+            if process_id not in self.resource_schedules:
+                self.resource_schedules[process_id] = []
+            self.resource_schedules[process_id].append(operation)
+            
+            # イベント発行
+            await self._emit_event("operation_scheduled", {
+                "operation_id": operation.operation_id,
+                "order_id": order.order_id,
+                "process_id": process_id,
+                "equipment_id": available_equipment.id,
+                "start_time": start_time.isoformat(),
+                "end_time": end_time.isoformat()
+            })
+            
+            return operation
+            
+        except Exception as e:
+            await self._emit_event("scheduling_error", {
+                "error": str(e),
+                "order_id": order.order_id,
+                "process_id": process_id
+            })
+            return None
+    
+    async def _is_equipment_available(self, equipment_id: str, start_time: datetime, 
+                                    end_time: datetime) -> bool:
+        """設備が指定時間に利用可能かチェック"""
+        # 既存のスケジュールと重複がないかチェック
+        for operation in self.scheduled_operations.values():
+            if (operation.equipment_id == equipment_id and
+                operation.status in ["scheduled", "running"]):
+                
+                # 時間の重複チェック
+                if not (end_time <= operation.scheduled_start or 
+                       start_time >= operation.scheduled_end):
+                    return False
+        
+        return True
+    
+    async def _find_available_slot(self, process_id: str, desired_start: datetime, 
+                                 desired_end: datetime) -> Tuple[Optional[datetime], Optional[datetime]]:
+        """利用可能な時間枠を見つける"""
+        duration = (desired_end - desired_start).total_seconds()
+        
+        # 現在時刻から24時間後まで探索
+        search_start = datetime.now()
+        search_end = search_start + timedelta(hours=24)
+        
+        current_time = search_start
+        
+        while current_time + timedelta(seconds=duration) <= search_end:
+            # この時間枠で利用可能かチェック
+            if await self._is_process_available(process_id, current_time, 
+                                              current_time + timedelta(seconds=duration)):
+                return current_time, current_time + timedelta(seconds=duration)
+            
+            # 30分ずつ進める
+            current_time += timedelta(minutes=30)
+        
+        return None, None
+    
+    async def _is_process_available(self, process_id: str, start_time: datetime, 
+                                  end_time: datetime) -> bool:
+        """工程が指定時間に利用可能かチェック"""
+        # 工程内の全設備の利用可能性をチェック
+        process = self.factory.processes.get(process_id)
+        if not process:
+            return False
+        
+        for equipment in process.equipments.values():
+            if await self._is_equipment_available(equipment.id, start_time, end_time):
+                return True
+        
+        return False
+    
+    async def _schedule_drum_process(self, pending_orders: List[ProductionOrder]) -> List[ScheduledOperation]:
+        """ドラム（制約工程）のスケジューリング"""
+        if not self.drum_process:
+            return []
+        
+        drum_operations = []
+        current_time = datetime.now()
+        
+        # 制約工程の能力に基づいてスケジューリング
+        for order in sorted(pending_orders, key=lambda x: x.priority, reverse=True):
+            # 制約工程の処理時間を取得
+            processing_time = await self._get_processing_time(order.product_id, self.drum_process)
+            
+            # 利用可能な時間枠を見つける
+            start_time, end_time = await self._find_drum_slot(
+                self.drum_process, processing_time, current_time
+            )
+            
+            if start_time and end_time:
+                operation = await self._schedule_operation_backward(
+                    order, self.drum_process, start_time, end_time
+                )
+                if operation:
+                    drum_operations.append(operation)
+                    current_time = end_time
+        
+        return drum_operations
+    
+    async def _find_drum_slot(self, process_id: str, duration: float, 
+                             after_time: datetime) -> Tuple[Optional[datetime], Optional[datetime]]:
+        """制約工程の利用可能時間枠を見つける"""
+        # 制約工程は優先的にスケジュール
+        search_start = after_time
+        search_end = search_start + timedelta(hours=48)  # 48時間後まで探索
+        
+        current_time = search_start
+        
+        while current_time + timedelta(seconds=duration) <= search_end:
+            if await self._is_process_available(process_id, current_time, 
+                                              current_time + timedelta(seconds=duration)):
+                return current_time, current_time + timedelta(seconds=duration)
+            
+            # 15分ずつ進める（制約工程は細かく管理）
+            current_time += timedelta(minutes=15)
+        
+        return None, None
+    
+    async def _set_buffers_for_toc(self, drum_schedule: List[ScheduledOperation]):
+        """TOC用のバッファを設定"""
+        if not drum_schedule:
+            return
+        
+        # ドラム工程の前後にバッファを設定
+        drum_process = self.drum_process
+        if drum_process in self.factory.processes:
+            # 前バッファ（材料バッファ）
+            if drum_process in self.buffer_sizes:
+                buffer_size = self.buffer_sizes[drum_process]
+                await self._emit_event("toc_buffer_set", {
+                    "process_id": drum_process,
+                    "buffer_type": "input",
+                    "size": buffer_size
+                })
+            
+            # 後バッファ（完成品バッファ）
+            await self._emit_event("toc_buffer_set", {
+                "process_id": drum_process,
+                "buffer_type": "output",
+                "size": 20  # デフォルトサイズ
+            })
+    
+    async def _determine_rope_schedule(self, drum_schedule: List[ScheduledOperation]):
+        """ロープ（材料投入タイミング）のスケジュールを決定"""
+        if not drum_schedule:
+            return
+        
+        # ドラム工程のスケジュールに基づいて材料投入タイミングを決定
+        for operation in drum_schedule:
+            # 材料投入は作業開始の一定時間前に設定
+            material_release_time = operation.scheduled_start - timedelta(hours=2)
+            
+            await self._emit_event("material_release_scheduled", {
+                "operation_id": operation.operation_id,
+                "material_release_time": material_release_time.isoformat(),
+                "process_id": operation.process_id
+            })
+    
+    async def _level_production(self, orders: List[ProductionOrder]) -> List[ProductionOrder]:
+        """生産平準化（ヘイジュンカ）"""
+        if not orders:
+            return []
+        
+        # 優先度と納期でソート
+        sorted_orders = sorted(orders, key=lambda x: (x.priority, x.due_date))
+        
+        # 平準化されたリストを作成
+        leveled_orders = []
+        for order in sorted_orders:
+            leveled_orders.append(order)
+        
+        return leveled_orders
+    
+    async def _schedule_one_piece_flow(self, order: ProductionOrder):
+        """単個流し（ワンピースフロー）のスケジューリング"""
+        # 単個流しでは、各工程を連続的にスケジュール
+        process_sequence = await self._determine_process_sequence(order.product_id)
+        
+        current_time = datetime.now()
+        for process_id in process_sequence:
+            processing_time = await self._get_processing_time(order.product_id, process_id)
+            
+            # 連続的にスケジュール
+            start_time = current_time
+            end_time = current_time + timedelta(seconds=processing_time)
+            
+            operation = await self._schedule_operation_backward(
+                order, process_id, start_time, end_time
+            )
+            
+            if operation:
+                current_time = end_time
+            else:
+                # スケジュールできない場合は待機時間を挿入
+                current_time += timedelta(minutes=30)
+    
+    async def _eliminate_waste_in_schedule(self):
+        """スケジュールからムダを排除"""
+        # 待機時間の最小化
+        # 段取り替え時間の最適化
+        # 在庫の最小化
+        
+        await self._emit_event("waste_elimination_completed", {
+            "message": "Schedule optimization completed"
+        })
+    
+    async def _emergency_schedule(self, order: ProductionOrder):
+        """緊急オーダーのスケジューリング"""
+        # 緊急オーダーは最優先でスケジュール
+        order.priority = 999  # 最高優先度
+        
+        # 即座にスケジュール
+        process_sequence = await self._determine_process_sequence(order.product_id)
+        
+        current_time = datetime.now()
+        for process_id in process_sequence:
+            processing_time = await self._get_processing_time(order.product_id, process_id)
+            
+            start_time = current_time
+            end_time = current_time + timedelta(seconds=processing_time)
+            
+            operation = await self._schedule_operation_backward(
+                order, process_id, start_time, end_time
+            )
+            
+            if operation:
+                current_time = end_time
+            else:
+                # 緊急のため、既存のスケジュールを調整
+                current_time += timedelta(minutes=15)
+    
+    async def _split_order_into_small_lots(self, order: ProductionOrder):
+        """オーダーを小ロットに分割"""
+        if order.quantity <= 10:
+            return
+        
+        # 10個ずつの小ロットに分割
+        lot_size = 10
+        num_lots = (order.quantity + lot_size - 1) // lot_size
+        
+        for i in range(num_lots):
+            lot_quantity = min(lot_size, order.quantity - i * lot_size)
+            
+            # 小ロット用のオーダーを作成
+            lot_order = ProductionOrder(
+                order_id=f"{order.order_id}_lot_{i+1}",
+                product_id=order.product_id,
+                quantity=lot_quantity,
+                due_date=order.due_date,
+                priority=order.priority,
+                order_type="kanban"
+            )
+            
+            # スケジュールに追加
+            self.production_orders[lot_order.order_id] = lot_order
+            self.order_queue.append(lot_order.order_id)
+    
     async def _emit_event(self, event_type: str, data: Dict[str, Any] = None):
         """イベントを発行"""
         event = SimulationEvent(

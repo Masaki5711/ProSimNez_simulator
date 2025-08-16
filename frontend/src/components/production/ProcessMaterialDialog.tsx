@@ -55,6 +55,9 @@ interface ProcessMaterialDialogProps {
   open: boolean;
   processData: AdvancedProcessData | null;
   products: Product[];
+  nodes?: any[];
+  edges?: any[];
+  processAdvancedData?: Map<string, AdvancedProcessData>;
   onClose: () => void;
   onSave: (processData: AdvancedProcessData) => void;
   // 前工程の出力製品を取得するための関数を追加
@@ -67,6 +70,9 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
   open,
   processData,
   products,
+  nodes = [],
+  edges = [],
+  processAdvancedData = new Map(),
   onClose,
   onSave,
   getPrecedingOutputs,
@@ -91,13 +97,57 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
   const [editingMaterialIndex, setEditingMaterialIndex] = useState<number | null>(null);
   const [editingOutputIndex, setEditingOutputIndex] = useState<number | null>(null);
 
+  // 前工程を取得する関数
+  const getPrecedingProcesses = useCallback(() => {
+    if (!processData?.id) return [];
+    
+    return edges
+      .filter(edge => edge.target === processData.id)
+      .map(edge => {
+        const sourceNode = nodes.find(node => node.id === edge.source);
+        const sourceProcessData = processAdvancedData.get(edge.source);
+        return {
+          id: edge.source,
+          name: sourceNode?.data?.label || sourceNode?.data?.name || 'Unknown Process',
+          data: sourceProcessData
+        };
+      })
+      .filter(process => process.data);
+  }, [processData, edges, nodes, processAdvancedData]);
+
+  // 前工程の出力製品を取得する関数
+  const getPrecedingOutputProducts = useCallback(() => {
+    const precedingProcesses = getPrecedingProcesses();
+    const outputProducts: any[] = [];
+    
+    precedingProcesses.forEach(process => {
+      if (process.data?.outputProducts) {
+        process.data.outputProducts.forEach((output: any) => {
+          const product = products.find(p => p.id === output.productId);
+          if (product) {
+            outputProducts.push({
+              ...product,
+              processName: process.name,
+              processId: process.id,
+              outputQuantity: output.outputQuantity,
+              qualityLevel: output.qualityLevel
+            });
+          }
+        });
+      }
+    });
+    
+    return outputProducts;
+  }, [getPrecedingProcesses, products]);
+
   // 投入材料の候補を取得
   const getInputMaterialCandidates = useCallback(() => {
     if (!processData) return [];
     
     if (isStorageProcess) {
-      // 保管庫の場合は全製品を候補に
-      return products;
+      // ストア工程の場合は前工程の出力製品を優先し、全製品も候補に
+      const precedingOutputs = getPrecedingOutputProducts();
+      return precedingOutputs.length > 0 ? precedingOutputs : products;
     }
     
     if (getPrecedingOutputs) {
@@ -108,7 +158,7 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
     
     // デフォルトは原材料と部品のみ
     return products.filter(p => p.type === 'raw_material' || p.type === 'component');
-  }, [processData, products, isStorageProcess, getPrecedingOutputs]);
+  }, [processData, products, isStorageProcess, getPrecedingOutputs, getPrecedingOutputProducts]);
 
   useEffect(() => {
     if (processData) {

@@ -33,6 +33,9 @@ interface ProcessEditDialogProps {
   open: boolean;
   nodeData: ProcessNodeData | null;
   nodeId?: string; // 工程IDを追加
+  nodes?: any[];
+  edges?: any[];
+  processAdvancedData?: Map<string, any>;
   onClose: () => void;
   onSave: (data: ProcessNodeData) => void;
   products?: Product[];
@@ -56,6 +59,9 @@ const ProcessEditDialog: React.FC<ProcessEditDialogProps> = ({
   open,
   nodeData,
   nodeId, // 工程IDを追加
+  nodes = [],
+  edges = [],
+  processAdvancedData = new Map(),
   onClose,
   onSave,
   products = [],
@@ -571,6 +577,10 @@ const ProcessEditDialog: React.FC<ProcessEditDialogProps> = ({
         open={materialDialogOpen}
         processData={processData}
         products={products}
+        nodes={nodes}
+        edges={edges}
+        processAdvancedData={processAdvancedData}
+        isStorageProcess={editData.type === 'store'}
         onClose={() => {
           setMaterialDialogOpen(false);
           setProcessData(null);
@@ -587,6 +597,9 @@ const ProcessEditDialog: React.FC<ProcessEditDialogProps> = ({
         open={advancedDialogOpen}
         processData={processData}
         products={products}
+        nodes={nodes}
+        edges={edges}
+        processAdvancedData={processAdvancedData}
         onClose={() => {
           setAdvancedDialogOpen(false);
           setProcessData(null);

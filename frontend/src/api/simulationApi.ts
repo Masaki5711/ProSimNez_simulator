@@ -33,6 +33,14 @@ export interface SimulationData {
   timestamp: string;
 }
 
+export interface Phase2TestReport {
+  filename: string;
+  filepath: string;
+  size: number;
+  created_at: string;
+  modified_at: string;
+}
+
 export const simulationApi = {
   // シミュレーション開始
   async start(config: SimulationConfig) {
@@ -75,6 +83,35 @@ export const simulationApi = {
   // シミュレーションデータ取得
   async getData(): Promise<SimulationData> {
     const response = await api.get('/simulation/data');
+    return response.data;
+  },
+
+  // フェーズ２テストレポート一覧取得
+  async getPhase2Reports(): Promise<{ reports: Phase2TestReport[] }> {
+    const response = await api.get('/simulation/reports');
+    return response.data;
+  },
+
+  // フェーズ２テストレポートダウンロード
+  async downloadPhase2Report(filename: string): Promise<void> {
+    const response = await api.get(`/simulation/reports/download/${filename}`, {
+      responseType: 'blob'
+    });
+    
+    // ブラウザでファイルダウンロードを実行
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  },
+
+  // フェーズ２テストレポート削除
+  async deletePhase2Report(filename: string) {
+    const response = await api.delete(`/simulation/reports/${filename}`);
     return response.data;
   },
 };

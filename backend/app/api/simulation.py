@@ -2,10 +2,13 @@
 シミュレーション関連のAPIエンドポイント
 """
 from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
 from datetime import datetime
 import asyncio
+import os
+import glob
 import json
 import uuid
 
@@ -144,6 +147,16 @@ async def start_simulation(config: SimulationConfig, background_tasks: Backgroun
             speed=config.speed
         )
         
+        # フェーズ２テスト設定を追加
+        config_dict = {
+            "start_time": config.start_time,
+            "speed": config.speed,
+            "duration": config.duration,
+            "factory_processes": len(factory.processes),
+            "factory_buffers": len(factory.buffers)
+        }
+        simulation_engine.start_phase2_test(config_dict)
+        
         # WebSocketイベントリスナーを追加
         from app.main import websocket_event_listener
         simulation_engine.add_event_listener(websocket_event_listener)
@@ -152,7 +165,7 @@ async def start_simulation(config: SimulationConfig, background_tasks: Backgroun
         simulation_task = asyncio.create_task(simulation_engine.start(config.duration))
         
         return {
-            "message": "シミュレーションが開始されました",
+            "message": "シミュレーションが開始されました（フェーズ２テストログ有効）",
             "status": "running",
             "config": config.dict()
         }
@@ -197,12 +210,28 @@ async def stop_simulation():
         raise HTTPException(status_code=400, detail="シミュレーションが開始されていません")
         
     try:
+        report_path = None
+        
+        # フェーズ２テスト終了処理
+        simulation_engine.end_phase2_test()
+        
+        # MDレポート生成
+        try:
+            report_path = simulation_engine.generate_phase2_test_report()
+            print(f"📄 テストレポートが生成されました: {report_path}")
+        except Exception as report_error:
+            print(f"⚠️ レポート生成エラー: {str(report_error)}")
+        
         await simulation_engine.stop()
         
         if simulation_task and not simulation_task.done():
             simulation_task.cancel()
             
-        return {"message": "シミュレーションが停止されました", "status": "stopped"}
+        return {
+            "message": "シミュレーションが停止されました（フェーズ２テストレポート生成完了）",
+            "status": "stopped",
+            "report_path": report_path
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"停止エラー: {str(e)}")
 
@@ -257,6 +286,84 @@ async def get_simulation_data():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"データ取得エラー: {str(e)}")
+
+@router.get("/reports")
+async def list_phase2_reports():
+    """フェーズ２テストレポート一覧を取得"""
+    try:
+        reports_dir = "reports"
+        if not os.path.exists(reports_dir):
+            return {"reports": []}
+            
+        report_files = glob.glob(os.path.join(reports_dir, "phase2_test_report_*.md"))
+        reports = []
+        
+        for filepath in sorted(report_files, reverse=True):  # 新しい順
+            filename = os.path.basename(filepath)
+            file_stats = os.stat(filepath)
+            
+            reports.append({
+                "filename": filename,
+                "filepath": filepath,
+                "size": file_stats.st_size,
+                "created_at": datetime.fromtimestamp(file_stats.st_ctime).isoformat(),
+                "modified_at": datetime.fromtimestamp(file_stats.st_mtime).isoformat()
+            })
+            
+        return {"reports": reports}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"レポート一覧取得エラー: {str(e)}")
+
+@router.get("/reports/download/{filename}")
+async def download_phase2_report(filename: str):
+    """フェーズ２テストレポートをダウンロード"""
+    try:
+        # セキュリティチェック: ファイル名に不正なパスが含まれていないか確認
+        if ".." in filename or "/" in filename or "\\" in filename:
+            raise HTTPException(status_code=400, detail="不正なファイル名です")
+            
+        if not filename.startswith("phase2_test_report_") or not filename.endswith(".md"):
+            raise HTTPException(status_code=400, detail="フェーズ２テストレポートファイルではありません")
+            
+        filepath = os.path.join("reports", filename)
+        
+        if not os.path.exists(filepath):
+            raise HTTPException(status_code=404, detail="レポートファイルが見つかりません")
+            
+        return FileResponse(
+            filepath,
+            media_type="text/markdown",
+            filename=filename,
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"ダウンロードエラー: {str(e)}")
+
+@router.delete("/reports/{filename}")
+async def delete_phase2_report(filename: str):
+    """フェーズ２テストレポートを削除"""
+    try:
+        # セキュリティチェック
+        if ".." in filename or "/" in filename or "\\" in filename:
+            raise HTTPException(status_code=400, detail="不正なファイル名です")
+            
+        if not filename.startswith("phase2_test_report_") or not filename.endswith(".md"):
+            raise HTTPException(status_code=400, detail="フェーズ２テストレポートファイルではありません")
+            
+        filepath = os.path.join("reports", filename)
+        
+        if not os.path.exists(filepath):
+            raise HTTPException(status_code=404, detail="レポートファイルが見つかりません")
+            
+        os.remove(filepath)
+        
+        return {"message": f"レポート {filename} を削除しました"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"削除エラー: {str(e)}")
 
 # 新しいマスターシミュレータ用APIエンドポイント
 

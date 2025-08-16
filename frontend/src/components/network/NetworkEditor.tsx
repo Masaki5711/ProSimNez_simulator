@@ -2170,6 +2170,9 @@ const NetworkEditor = () => {
             open={processEditDialogOpen}
             nodeData={selectedNode?.data || null}
             nodeId={selectedNode?.id} // 工程IDを追加
+            nodes={nodes}
+            edges={edges}
+            processAdvancedData={processAdvancedData}
             onClose={() => {
               setProcessEditDialogOpen(false);
               setSelectedNode(null);
@@ -2492,6 +2495,10 @@ const NetworkEditor = () => {
           <StoreEditDialog
             open={storeEditDialogOpen}
             nodeData={selectedStoreNode?.data || null}
+            products={products}
+            nodes={nodes}
+            edges={edges}
+            processAdvancedData={processAdvancedData}
             onClose={() => {
               setStoreEditDialogOpen(false);
               setSelectedStoreNode(null);

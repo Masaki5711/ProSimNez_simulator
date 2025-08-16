@@ -55,6 +55,9 @@ interface AdvancedProcessDialogProps {
   open: boolean;
   processData: AdvancedProcessData | null;
   products: Product[];
+  nodes?: any[];
+  edges?: any[];
+  processAdvancedData?: Map<string, AdvancedProcessData>;
   onClose: () => void;
   onSave: (processData: AdvancedProcessData) => void;
 }
@@ -63,6 +66,9 @@ const AdvancedProcessDialog: React.FC<AdvancedProcessDialogProps> = ({
   open,
   processData,
   products,
+  nodes = [],
+  edges = [],
+  processAdvancedData = new Map(),
   onClose,
   onSave,
 }) => {
@@ -99,6 +105,52 @@ const AdvancedProcessDialog: React.FC<AdvancedProcessDialogProps> = ({
       setEditData(processData);
     }
   }, [processData]);
+
+  // 前工程を取得する関数
+  const getPrecedingProcesses = () => {
+    if (!processData?.id) return [];
+    
+    return edges
+      .filter(edge => edge.target === processData.id)
+      .map(edge => {
+        const sourceNode = nodes.find(node => node.id === edge.source);
+        const sourceProcessData = processAdvancedData.get(edge.source);
+        return {
+          id: edge.source,
+          name: sourceNode?.data?.label || sourceNode?.data?.name || 'Unknown Process',
+          data: sourceProcessData
+        };
+      })
+      .filter(process => process.data);
+  };
+
+  // 前工程の出力製品を取得する関数
+  const getPrecedingOutputProducts = () => {
+    const precedingProcesses = getPrecedingProcesses();
+    const outputProducts: any[] = [];
+    
+    precedingProcesses.forEach(process => {
+      if (process.data?.outputProducts) {
+        process.data.outputProducts.forEach((output: any) => {
+          const product = products.find(p => p.id === output.productId);
+          if (product) {
+            outputProducts.push({
+              ...product,
+              processName: process.name,
+              processId: process.id,
+              outputQuantity: output.outputQuantity,
+              qualityLevel: output.qualityLevel
+            });
+          }
+        });
+      }
+    });
+    
+    return outputProducts;
+  };
+
+  // ストア工程かどうかを判定
+  const isStoreProcess = editData.type === 'store';
 
   const handleSave = () => {
     onSave(editData);
@@ -319,11 +371,45 @@ const AdvancedProcessDialog: React.FC<AdvancedProcessDialogProps> = ({
                               updateMaterial(index, 'materialName', product?.name || '');
                             }}
                           >
-                            {products.filter(p => p.type === 'raw_material' || p.type === 'component').map(product => (
-                              <MenuItem key={product.id} value={product.id}>
-                                {product.name}
-                              </MenuItem>
-                            ))}
+                            {isStoreProcess ? (
+                              // ストア工程の場合は前工程の出力製品を優先表示
+                              <>
+                                {getPrecedingOutputProducts().length > 0 && (
+                                  <>
+                                    <MenuItem disabled>
+                                      <em>前工程からの出力製品</em>
+                                    </MenuItem>
+                                    {getPrecedingOutputProducts().map(product => (
+                                      <MenuItem key={`preceding-${product.id}`} value={product.id}>
+                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                          <Typography>{product.name}</Typography>
+                                          <Chip label={product.processName} size="small" color="primary" />
+                                          <Chip label={`${product.outputQuantity} ${product.unit || '個'}`} size="small" />
+                                        </Box>
+                                      </MenuItem>
+                                    ))}
+                                    <MenuItem disabled>
+                                      <em>全ての製品</em>
+                                    </MenuItem>
+                                  </>
+                                )}
+                                {products.map(product => (
+                                  <MenuItem key={product.id} value={product.id}>
+                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                      <Typography>{product.name}</Typography>
+                                      <Chip label={product.type} size="small" />
+                                    </Box>
+                                  </MenuItem>
+                                ))}
+                              </>
+                            ) : (
+                              // 通常の工程の場合は従来通り
+                              products.filter(p => p.type === 'raw_material' || p.type === 'component').map(product => (
+                                <MenuItem key={product.id} value={product.id}>
+                                  {product.name}
+                                </MenuItem>
+                              ))
+                            )}
                           </Select>
                         </FormControl>
                       </TableCell>
@@ -458,11 +544,45 @@ const AdvancedProcessDialog: React.FC<AdvancedProcessDialogProps> = ({
                               updateOutput(index, 'productName', product?.name || '');
                             }}
                           >
-                            {products.map(product => (
-                              <MenuItem key={product.id} value={product.id}>
-                                {product.name}
-                              </MenuItem>
-                            ))}
+                            {isStoreProcess ? (
+                              // ストア工程の場合は前工程の出力製品を優先表示
+                              <>
+                                {getPrecedingOutputProducts().length > 0 && (
+                                  <>
+                                    <MenuItem disabled>
+                                      <em>前工程からの出力製品 (在庫候補)</em>
+                                    </MenuItem>
+                                    {getPrecedingOutputProducts().map(product => (
+                                      <MenuItem key={`preceding-output-${product.id}`} value={product.id}>
+                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                          <Typography>{product.name}</Typography>
+                                          <Chip label={product.processName} size="small" color="secondary" />
+                                          <Chip label={`品質: ${product.qualityLevel || 'standard'}`} size="small" color="info" />
+                                        </Box>
+                                      </MenuItem>
+                                    ))}
+                                    <MenuItem disabled>
+                                      <em>全ての製品</em>
+                                    </MenuItem>
+                                  </>
+                                )}
+                                {products.map(product => (
+                                  <MenuItem key={product.id} value={product.id}>
+                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                      <Typography>{product.name}</Typography>
+                                      <Chip label={product.type} size="small" />
+                                    </Box>
+                                  </MenuItem>
+                                ))}
+                              </>
+                            ) : (
+                              // 通常の工程の場合は従来通り
+                              products.map(product => (
+                                <MenuItem key={product.id} value={product.id}>
+                                  {product.name}
+                                </MenuItem>
+                              ))
+                            )}
                           </Select>
                         </FormControl>
                       </TableCell>

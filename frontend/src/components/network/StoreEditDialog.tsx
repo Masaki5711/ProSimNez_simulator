@@ -35,11 +35,16 @@ import {
   Cancel as CancelIcon,
 } from '@mui/icons-material';
 import { ProcessNodeData, ProductionScheduleItem, InventoryLevel } from '../../types/networkEditor';
+import { Product, AdvancedProcessData } from '../../types/productionTypes';
 
 interface StoreEditDialogProps {
   open: boolean;
   onClose: () => void;
   nodeData: ProcessNodeData | null;
+  products?: Product[];
+  nodes?: any[];
+  edges?: any[];
+  processAdvancedData?: Map<string, AdvancedProcessData>;
   onSave: (nodeData: ProcessNodeData) => void;
 }
 
@@ -47,6 +52,10 @@ const StoreEditDialog: React.FC<StoreEditDialogProps> = ({
   open,
   onClose,
   nodeData,
+  products = [],
+  nodes = [],
+  edges = [],
+  processAdvancedData = new Map(),
   onSave,
 }) => {
   const { t } = useLanguage();
@@ -84,6 +93,49 @@ const StoreEditDialog: React.FC<StoreEditDialogProps> = ({
       });
     }
   }, [nodeData]);
+
+  // 前工程を取得する関数
+  const getPrecedingProcesses = () => {
+    if (!nodeData?.id) return [];
+    
+    return edges
+      .filter(edge => edge.target === nodeData.id)
+      .map(edge => {
+        const sourceNode = nodes.find(node => node.id === edge.source);
+        const sourceProcessData = processAdvancedData.get(edge.source);
+        return {
+          id: edge.source,
+          name: sourceNode?.data?.label || sourceNode?.data?.name || 'Unknown Process',
+          data: sourceProcessData
+        };
+      })
+      .filter(process => process.data);
+  };
+
+  // 前工程の出力製品を取得する関数
+  const getPrecedingOutputProducts = () => {
+    const precedingProcesses = getPrecedingProcesses();
+    const outputProducts: any[] = [];
+    
+    precedingProcesses.forEach(process => {
+      if (process.data?.outputProducts) {
+        process.data.outputProducts.forEach((output: any) => {
+          const product = products.find(p => p.id === output.productId);
+          if (product) {
+            outputProducts.push({
+              ...product,
+              processName: process.name,
+              processId: process.id,
+              outputQuantity: output.outputQuantity,
+              qualityLevel: output.qualityLevel
+            });
+          }
+        });
+      }
+    });
+    
+    return outputProducts;
+  };
 
   const handleInputChange = (field: string, value: any) => {
     setFormData(prev => ({
@@ -395,12 +447,52 @@ const StoreEditDialog: React.FC<StoreEditDialogProps> = ({
             <DialogContent>
               <Grid container spacing={2} sx={{ mt: 1 }}>
                 <Grid item xs={12}>
-                  <TextField
-                    fullWidth
-                    label="製品ID"
-                    value={editingSchedule.productId}
-                    onChange={(e) => setEditingSchedule(prev => prev ? { ...prev, productId: e.target.value } : null)}
-                  />
+                  <FormControl fullWidth>
+                    <InputLabel>製品選択</InputLabel>
+                    <Select
+                      value={editingSchedule.productId}
+                      onChange={(e) => {
+                        const selectedProduct = [...getPrecedingOutputProducts(), ...products].find(p => p.id === e.target.value);
+                        if (selectedProduct) {
+                          setEditingSchedule(prev => prev ? { 
+                            ...prev, 
+                            productId: e.target.value,
+                            productName: selectedProduct.name,
+                            unit: selectedProduct.unit || '個'
+                          } : null);
+                        }
+                      }}
+                      label="製品選択"
+                    >
+                      {getPrecedingOutputProducts().length > 0 && (
+                        <>
+                          <MenuItem disabled>
+                            <em>前工程からの出力製品 (生産計画候補)</em>
+                          </MenuItem>
+                          {getPrecedingOutputProducts().map(product => (
+                            <MenuItem key={`preceding-${product.id}`} value={product.id}>
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                <Typography>{product.name}</Typography>
+                                <Chip label={product.processName} size="small" color="primary" />
+                                <Chip label={`出力量: ${product.outputQuantity}`} size="small" color="info" />
+                              </Box>
+                            </MenuItem>
+                          ))}
+                          <MenuItem disabled>
+                            <em>全ての製品</em>
+                          </MenuItem>
+                        </>
+                      )}
+                      {products.map(product => (
+                        <MenuItem key={product.id} value={product.id}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <Typography>{product.name}</Typography>
+                            <Chip label={product.type} size="small" />
+                          </Box>
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
                 </Grid>
                 <Grid item xs={12}>
                   <TextField
@@ -408,6 +500,8 @@ const StoreEditDialog: React.FC<StoreEditDialogProps> = ({
                     label="製品名"
                     value={editingSchedule.productName}
                     onChange={(e) => setEditingSchedule(prev => prev ? { ...prev, productName: e.target.value } : null)}
+                    InputProps={{ readOnly: true }}
+                    helperText="製品選択で自動入力されます"
                   />
                 </Grid>
                 <Grid item xs={6}>
@@ -496,12 +590,52 @@ const StoreEditDialog: React.FC<StoreEditDialogProps> = ({
             <DialogContent>
               <Grid container spacing={2} sx={{ mt: 1 }}>
                 <Grid item xs={12}>
-                  <TextField
-                    fullWidth
-                    label="製品ID"
-                    value={editingInventory.productId}
-                    onChange={(e) => setEditingInventory(prev => prev ? { ...prev, productId: e.target.value } : null)}
-                  />
+                  <FormControl fullWidth>
+                    <InputLabel>製品選択</InputLabel>
+                    <Select
+                      value={editingInventory.productId}
+                      onChange={(e) => {
+                        const selectedProduct = [...getPrecedingOutputProducts(), ...products].find(p => p.id === e.target.value);
+                        if (selectedProduct) {
+                          setEditingInventory(prev => prev ? { 
+                            ...prev, 
+                            productId: e.target.value,
+                            productName: selectedProduct.name,
+                            unit: selectedProduct.unit || '個'
+                          } : null);
+                        }
+                      }}
+                      label="製品選択"
+                    >
+                      {getPrecedingOutputProducts().length > 0 && (
+                        <>
+                          <MenuItem disabled>
+                            <em>前工程からの出力製品 (在庫候補)</em>
+                          </MenuItem>
+                          {getPrecedingOutputProducts().map(product => (
+                            <MenuItem key={`preceding-inventory-${product.id}`} value={product.id}>
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                <Typography>{product.name}</Typography>
+                                <Chip label={product.processName} size="small" color="secondary" />
+                                <Chip label={`品質: ${product.qualityLevel || 'standard'}`} size="small" color="info" />
+                              </Box>
+                            </MenuItem>
+                          ))}
+                          <MenuItem disabled>
+                            <em>全ての製品</em>
+                          </MenuItem>
+                        </>
+                      )}
+                      {products.map(product => (
+                        <MenuItem key={product.id} value={product.id}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <Typography>{product.name}</Typography>
+                            <Chip label={product.type} size="small" />
+                          </Box>
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
                 </Grid>
                 <Grid item xs={12}>
                   <TextField
@@ -509,6 +643,8 @@ const StoreEditDialog: React.FC<StoreEditDialogProps> = ({
                     label="製品名"
                     value={editingInventory.productName}
                     onChange={(e) => setEditingInventory(prev => prev ? { ...prev, productName: e.target.value } : null)}
+                    InputProps={{ readOnly: true }}
+                    helperText="製品選択で自動入力されます"
                   />
                 </Grid>
                 <Grid item xs={6}>
