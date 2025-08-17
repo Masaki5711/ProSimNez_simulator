@@ -231,6 +231,19 @@ export interface MaterialInput {
     supplierLeadTime: number;
     kanbanType: 'production' | 'withdrawal' | 'supplier';
   };
+  
+  // 部品ごとの初期バッファー設定
+  initialBufferSettings?: {
+    enabled: boolean;
+    inputBufferId?: string;    // 入力バッファーID
+    outputBufferId?: string;   // 出力バッファーID
+    initialStock: number;      // 初期在庫数
+    safetyStock: number;       // 安全在庫数
+    maxCapacity: number;       // 最大容量
+    bufferType: 'input' | 'output' | 'both'; // バッファータイプ
+    location?: string;         // バッファー位置
+    notes?: string;            // 備考
+  };
 }
 
 /**

@@ -1,6 +1,28 @@
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
 import { Project, ProjectFilter } from '../types/projectTypes';
 
+// デフォルトプロジェクト作成のヘルパー関数
+const createDefaultProjects = (): Project[] => {
+  const defaultProject: Project = {
+    id: '1',
+    name: 'デモファクトリー',
+    description: '完全な生産ラインを含むデモンストレーション用ファクトリーです。原材料から出荷まで7つの工程を含みます。',
+    category: 'manufacturing',
+    tags: ['デモ', '完全な生産ライン', 'シミュレーション対応'],
+    status: 'active',
+    version: '2.0.0',
+    createdBy: 'system',
+    createdAt: new Date('2025-01-15T12:00:00.000Z'),
+    updatedAt: new Date('2025-01-15T12:00:00.000Z'),
+  };
+  
+  // localStorageに保存
+  localStorage.setItem('projects', JSON.stringify([defaultProject]));
+  console.log('🔍 Created default project:', defaultProject.name);
+  
+  return [defaultProject];
+};
+
 // プロジェクト管理の状態
 interface ProjectState {
   projects: Project[];
@@ -64,7 +86,14 @@ export const fetchProjects = createAsyncThunk(
         // APIからのデータが空の場合はlocalStorageを使用
         if (projects.length === 0) {
           console.log('🔍 API data is empty, falling back to localStorage');
-          throw new Error('Empty API response, use localStorage');
+          // エラーを投げずにlocalStorageから取得
+          const localProjects = JSON.parse(localStorage.getItem('projects') || '[]');
+          if (localProjects.length > 0) {
+            console.log('🔍 Using localStorage projects:', localProjects.length);
+            return localProjects;
+          }
+          // localStorageも空の場合はデフォルトプロジェクトを作成
+          return createDefaultProjects();
         }
         
         return projects;
@@ -76,32 +105,26 @@ export const fetchProjects = createAsyncThunk(
       // 配列でも空の場合はlocalStorageフォールバック
       if (result.length === 0) {
         console.log('🔍 API result is empty, falling back to localStorage');
-        throw new Error('Empty API response, use localStorage');
+        // エラーを投げずにlocalStorageから取得
+        const localProjects = JSON.parse(localStorage.getItem('projects') || '[]');
+        if (localProjects.length > 0) {
+          console.log('🔍 Using localStorage projects:', localProjects.length);
+          return localProjects;
+        }
+        // localStorageも空の場合はデフォルトプロジェクトを作成
+        return createDefaultProjects();
       }
       
       return result;
     } catch (error) {
       // APIが利用できない場合はlocalStorageを使用
-      console.warn('API not available, using localStorage:', error);
+      console.log('🔍 API unavailable, using localStorage fallback');
       
       const projects = JSON.parse(localStorage.getItem('projects') || '[]');
       
       // デフォルトプロジェクトがない場合は作成
       if (projects.length === 0) {
-        const defaultProject: Project = {
-          id: '1',
-          name: 'デモファクトリー',
-          description: '完全な生産ラインを含むデモンストレーション用ファクトリーです。原材料から出荷まで7つの工程を含みます。',
-          category: 'manufacturing',
-          tags: ['デモ', '完全な生産ライン', 'シミュレーション対応'],
-          status: 'active',
-          version: '2.0.0',
-          createdBy: 'system',
-          createdAt: new Date('2025-01-15T12:00:00.000Z'),
-          updatedAt: new Date('2025-01-15T12:00:00.000Z'),
-        };
-        projects.push(defaultProject);
-        localStorage.setItem('projects', JSON.stringify(projects));
+        return createDefaultProjects();
       }
       
       return projects;

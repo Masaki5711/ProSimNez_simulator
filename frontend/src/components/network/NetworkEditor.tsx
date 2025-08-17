@@ -2440,6 +2440,9 @@ const NetworkEditor = () => {
             open={materialDialogOpen}
             processData={selectedProcessForMaterial}
             products={products}
+            nodes={nodes}
+            edges={edges}
+            processAdvancedData={processAdvancedData}
             onClose={() => {
               console.log('ProcessMaterialDialog closed');
               setMaterialDialogOpen(false);

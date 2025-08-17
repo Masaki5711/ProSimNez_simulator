@@ -87,6 +87,15 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
     storageLocation: '',
     isDefective: false,
     qualityGrade: 'A',
+    initialBufferSettings: {
+      enabled: false,
+      initialStock: 0,
+      safetyStock: 0,
+      maxCapacity: 100,
+      bufferType: 'input',
+      location: '',
+      notes: ''
+    }
   });
   const [newOutput, setNewOutput] = useState<Partial<ProductOutput>>({
     outputQuantity: 1,
@@ -101,18 +110,36 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
   const getPrecedingProcesses = useCallback(() => {
     if (!processData?.id) return [];
     
-    return edges
-      .filter(edge => edge.target === processData.id)
-      .map(edge => {
-        const sourceNode = nodes.find(node => node.id === edge.source);
-        const sourceProcessData = processAdvancedData.get(edge.source);
-        return {
-          id: edge.source,
-          name: sourceNode?.data?.label || sourceNode?.data?.name || 'Unknown Process',
-          data: sourceProcessData
-        };
-      })
-      .filter(process => process.data);
+    console.log('🔍 getPrecedingProcesses 呼び出し:', {
+      processId: processData.id,
+      edgesCount: edges.length,
+      nodesCount: nodes.length,
+      processAdvancedDataSize: processAdvancedData.size
+    });
+    
+    const filteredEdges = edges.filter(edge => edge.target === processData.id);
+    console.log('🔗 対象エッジ:', filteredEdges);
+    
+    const precedingProcesses = filteredEdges.map(edge => {
+      const sourceNode = nodes.find(node => node.id === edge.source);
+      const sourceProcessData = processAdvancedData.get(edge.source);
+      
+      console.log(`📋 エッジ ${edge.source} -> ${edge.target}:`, {
+        sourceNode: sourceNode?.data,
+        sourceProcessData: sourceProcessData
+      });
+      
+      return {
+        id: edge.source,
+        name: sourceNode?.data?.label || sourceNode?.data?.name || 'Unknown Process',
+        data: sourceProcessData
+      };
+    });
+    
+    const validProcesses = precedingProcesses.filter(process => process.data);
+    console.log('✅ 有効な前工程:', validProcesses);
+    
+    return validProcesses;
   }, [processData, edges, nodes, processAdvancedData]);
 
   // 前工程の出力製品を取得する関数
@@ -120,7 +147,15 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
     const precedingProcesses = getPrecedingProcesses();
     const outputProducts: any[] = [];
     
+    console.log('🔍 前工程検索:', { 
+      processId: processData?.id, 
+      edges: edges.length, 
+      precedingProcesses: precedingProcesses.length 
+    });
+    
     precedingProcesses.forEach(process => {
+      console.log(`📋 前工程 ${process.name}:`, process.data);
+      
       if (process.data?.outputProducts) {
         process.data.outputProducts.forEach((output: any) => {
           const product = products.find(p => p.id === output.productId);
@@ -132,43 +167,73 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
               outputQuantity: output.outputQuantity,
               qualityLevel: output.qualityLevel
             });
+            console.log(`✅ 出力製品追加: ${product.name} (${process.name})`);
+          } else {
+            console.log(`⚠️ 製品が見つかりません: ${output.productId}`);
           }
         });
+      } else {
+        console.log(`⚠️ 前工程 ${process.name} に出力製品がありません`);
       }
     });
     
+    console.log(`📊 前工程出力製品数: ${outputProducts.length}`);
     return outputProducts;
-  }, [getPrecedingProcesses, products]);
+  }, [getPrecedingProcesses, products, processData?.id, edges]);
 
   // 投入材料の候補を取得
   const getInputMaterialCandidates = useCallback(() => {
     if (!processData) return [];
     
+    // 前工程の出力製品を最優先
+    const precedingOutputs = getPrecedingOutputProducts();
+    if (precedingOutputs.length > 0) {
+      return precedingOutputs;
+    }
+    
     if (isStorageProcess) {
-      // ストア工程の場合は前工程の出力製品を優先し、全製品も候補に
-      const precedingOutputs = getPrecedingOutputProducts();
-      return precedingOutputs.length > 0 ? precedingOutputs : products;
+      // ストア工程の場合は前工程の出力製品がない場合のみ全製品を候補に
+      return products;
     }
     
     if (getPrecedingOutputs) {
       // 前工程の出力製品を候補に
       const precedingOutputs = getPrecedingOutputs(processData.id);
-      return precedingOutputs;
+      if (precedingOutputs.length > 0) {
+        return precedingOutputs;
+      }
     }
     
-    // デフォルトは原材料と部品のみ
-    return products.filter(p => p.type === 'raw_material' || p.type === 'component');
+    // 前工程の出力製品がない場合は原材料のみ
+    return products.filter(p => p.type === 'raw_material');
   }, [processData, products, isStorageProcess, getPrecedingOutputs, getPrecedingOutputProducts]);
 
   useEffect(() => {
     if (processData) {
+      console.log('🔄 ProcessMaterialDialog 初期化:', {
+        processId: processData.id,
+        processName: processData.label || processData.id,
+        nodesCount: nodes.length,
+        edgesCount: edges.length,
+        processAdvancedDataSize: processAdvancedData.size
+      });
+      
       setEditingProcess({
         ...processData,
         inputMaterials: [...(processData.inputMaterials || [])],
         outputProducts: [...(processData.outputProducts || [])],
       });
+      
+      // 前工程の情報を即座に確認
+      const precedingProcesses = getPrecedingProcesses();
+      const precedingOutputs = getPrecedingOutputProducts();
+      
+      console.log('📊 初期化時の前工程情報:', {
+        precedingProcesses: precedingProcesses.length,
+        precedingOutputs: precedingOutputs.length
+      });
     }
-  }, [processData]);
+  }, [processData, nodes, edges, processAdvancedData, getPrecedingProcesses, getPrecedingOutputProducts]);
 
   // 材料投入追加
   const handleAddMaterial = () => {
@@ -206,6 +271,16 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
         maxInventory: 50,
         supplierLeadTime: 3,
         kanbanType: 'production'
+      },
+      // デフォルトの初期バッファー設定
+      initialBufferSettings: {
+        enabled: false,
+        initialStock: 0,
+        safetyStock: 0,
+        maxCapacity: 100,
+        bufferType: 'input',
+        location: '',
+        notes: ''
       }
     };
 
@@ -222,6 +297,15 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
       storageLocation: '',
       isDefective: false,
       qualityGrade: 'A',
+      initialBufferSettings: {
+        enabled: false,
+        initialStock: 0,
+        safetyStock: 0,
+        maxCapacity: 100,
+        bufferType: 'input',
+        location: '',
+        notes: ''
+      }
     });
   };
 
@@ -273,6 +357,8 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
       minBatchSize: material.minBatchSize,
       maxBatchSize: material.maxBatchSize,
       kanbanSettings: material.kanbanSettings,
+      // 初期バッファー設定も含める
+      initialBufferSettings: material.initialBufferSettings,
     });
   };
 
@@ -294,6 +380,8 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
       minBatchSize: newMaterial.minBatchSize,
       maxBatchSize: newMaterial.maxBatchSize,
       kanbanSettings: newMaterial.kanbanSettings,
+      // 初期バッファー設定も含める
+      initialBufferSettings: newMaterial.initialBufferSettings,
     } as MaterialInput;
 
     setEditingProcess({
@@ -402,6 +490,56 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                   <MaterialIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
                   投入材料・部品
                 </Typography>
+                
+                {/* 前工程の出力製品情報を表示 */}
+                {getPrecedingOutputProducts().length > 0 ? (
+                  <Alert severity="info" sx={{ mb: 2 }}>
+                    <Typography variant="body2">
+                      🔗 <strong>前工程の出力製品</strong>が検出されました。これらを投入材料として使用できます。
+                    </Typography>
+                    <Box sx={{ mt: 1 }}>
+                      {getPrecedingOutputProducts().map((product, index) => (
+                        <Chip
+                          key={index}
+                          label={`${product.name} (${product.processName})`}
+                          size="small"
+                          color="primary"
+                          variant="outlined"
+                          sx={{ mr: 1, mb: 1 }}
+                        />
+                      ))}
+                    </Box>
+                  </Alert>
+                ) : (
+                  <Alert severity="warning" sx={{ mb: 2 }}>
+                    <Typography variant="body2">
+                      ⚠️ <strong>前工程の出力製品</strong>が検出されませんでした。
+                    </Typography>
+                    <Typography variant="body2" sx={{ mt: 1 }}>
+                      原材料のみが投入材料として選択可能です。前工程との接続を確認してください。
+                    </Typography>
+                    <Box sx={{ mt: 2, p: 2, backgroundColor: '#f5f5f5', borderRadius: 1, fontSize: '12px' }}>
+                      <Typography variant="caption" color="text.secondary">
+                        <strong>デバッグ情報:</strong>
+                      </Typography>
+                      <Typography variant="caption" component="div" sx={{ display: 'block', mt: 1 }}>
+                        • 接続エッジ数: {edges.length}
+                      </Typography>
+                      <Typography variant="caption" component="div" sx={{ display: 'block' }}>
+                        • 工程ノード数: {nodes.length}
+                      </Typography>
+                      <Typography variant="caption" component="div" sx={{ display: 'block' }}>
+                        • 工程詳細データ数: {processAdvancedData.size}
+                      </Typography>
+                      <Typography variant="caption" component="div" sx={{ display: 'block' }}>
+                        • 前工程数: {getPrecedingProcesses().length}
+                      </Typography>
+                      <Typography variant="caption" component="div" sx={{ display: 'block' }}>
+                        • 前工程出力製品数: {getPrecedingOutputProducts().length}
+                      </Typography>
+                    </Box>
+                  </Alert>
+                )}
 
                 {/* 材料追加フォーム */}
                 <Accordion>
@@ -416,31 +554,101 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                         <InputLabel>材料・部品</InputLabel>
                         <Select
                           value={newMaterial.materialId || ''}
-                          onChange={(e) => setNewMaterial({ ...newMaterial, materialId: e.target.value })}
+                          onChange={(e) => {
+                            const selectedMaterialId = e.target.value;
+                            const selectedProduct = products.find(p => p.id === selectedMaterialId);
+                            const precedingProduct = getPrecedingOutputProducts().find(p => p.id === selectedMaterialId);
+                            
+                            setNewMaterial({ 
+                              ...newMaterial, 
+                              materialId: selectedMaterialId,
+                              // 前工程の出力製品の場合、関連情報を自動設定
+                              ...(precedingProduct && {
+                                originalProductId: precedingProduct.id,
+                                storageLocation: `前工程: ${precedingProduct.processName}`,
+                                supplyMethod: 'kanban' as any
+                              })
+                            });
+                          }}
                         >
-                          {getInputMaterialCandidates()
-                            .filter(p => p.type === 'raw_material' || p.type === 'component' || p.type === 'defective_product')
-                            .map((product) => (
-                            <MenuItem key={product.id} value={product.id}>
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                <MaterialIcon />
-                                <Typography>{product.name}</Typography>
-                                <Chip 
-                                  label={product.type} 
-                                  size="small" 
-                                  color={product.isDefective ? 'error' : 'default'}
-                                />
-                                {product.isDefective && (
-                                  <Chip 
-                                    label="不良品" 
-                                    size="small" 
-                                    color="error" 
-                                    variant="outlined"
-                                  />
-                                )}
+                          {/* 前工程の出力製品を最優先表示 */}
+                          {getPrecedingOutputProducts().length > 0 ? (
+                            <>
+                              <Box>
+                                <Typography variant="caption" color="primary" sx={{ px: 2, py: 1, display: 'block' }}>
+                                  🔗 前工程の出力製品（推奨）
+                                </Typography>
+                                {getPrecedingOutputProducts().map((product) => (
+                                  <MenuItem key={`preceding_${product.id}`} value={product.id}>
+                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                      <MaterialIcon />
+                                      <Typography>{product.name}</Typography>
+                                      <Chip 
+                                        label={`前工程: ${product.processName}`}
+                                        size="small" 
+                                        color="primary"
+                                        variant="outlined"
+                                      />
+                                      <Chip 
+                                        label={product.type} 
+                                        size="small" 
+                                        color="default"
+                                      />
+                                    </Box>
+                                  </MenuItem>
+                                ))}
                               </Box>
-                            </MenuItem>
-                          ))}
+                              
+                              {/* 原材料（前工程の出力製品がある場合） */}
+                              {products.filter(p => p.type === 'raw_material').length > 0 && (
+                                <>
+                                  <Box sx={{ borderTop: 1, borderColor: 'divider', my: 1 }} />
+                                  <Box>
+                                    <Typography variant="caption" color="text.secondary" sx={{ px: 2, py: 1, display: 'block' }}>
+                                      🌱 原材料（補助的）
+                                    </Typography>
+                                    {products
+                                      .filter(p => p.type === 'raw_material')
+                                      .map((product) => (
+                                      <MenuItem key={product.id} value={product.id}>
+                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                          <MaterialIcon />
+                                          <Typography>{product.name}</Typography>
+                                          <Chip 
+                                            label={product.type} 
+                                            size="small" 
+                                            color="default"
+                                          />
+                                        </Box>
+                                      </MenuItem>
+                                    ))}
+                                  </Box>
+                                </>
+                              )}
+                            </>
+                          ) : (
+                            /* 前工程の出力製品がない場合は原材料のみ */
+                            <Box>
+                              <Typography variant="caption" color="text.secondary" sx={{ px: 2, py: 1, display: 'block' }}>
+                                🌱 原材料
+                              </Typography>
+                              {products
+                                .filter(p => p.type === 'raw_material')
+                                .map((product) => (
+                                <MenuItem key={product.id} value={product.id}>
+                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                    <MaterialIcon />
+                                    <Typography>{product.name}</Typography>
+                                    <Chip 
+                                      label={product.type} 
+                                      size="small" 
+                                      color="default"
+                                    />
+                                  </Box>
+                                </MenuItem>
+                              ))}
+                            </Box>
+                          )}
                         </Select>
                       </FormControl>
 
@@ -492,7 +700,7 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                         fullWidth
                       />
 
-                      {/* 不良品設定 */}
+                      {/* 品質・不良品設定 */}
                       <Box sx={{ mt: 2, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
                         <Typography variant="subtitle2" gutterBottom>
                           品質・不良品設定
@@ -535,6 +743,134 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                             sx={{ mt: 1 }}
                             helperText="この不良品の元となった製品のIDを入力してください"
                           />
+                        )}
+                      </Box>
+
+                      {/* 部品ごとの初期バッファー設定 */}
+                      <Box sx={{ mt: 2, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                        <Typography variant="subtitle2" gutterBottom>
+                          🗂️ 初期バッファー設定
+                        </Typography>
+                        
+                        <FormControlLabel
+                          control={
+                            <Switch
+                              checked={newMaterial.initialBufferSettings?.enabled || false}
+                              onChange={(e) => setNewMaterial({
+                                ...newMaterial,
+                                initialBufferSettings: {
+                                  ...newMaterial.initialBufferSettings,
+                                  enabled: e.target.checked,
+                                  initialStock: 0,
+                                  safetyStock: 0,
+                                  maxCapacity: 100,
+                                  bufferType: 'input',
+                                  location: '',
+                                  notes: ''
+                                }
+                              })}
+                            />
+                          }
+                          label="初期バッファーを有効化"
+                        />
+
+                        {newMaterial.initialBufferSettings?.enabled && (
+                          <>
+                            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mt: 2 }}>
+                              <FormControl fullWidth>
+                                <InputLabel>バッファータイプ</InputLabel>
+                                <Select
+                                  value={newMaterial.initialBufferSettings.bufferType || 'input'}
+                                  onChange={(e) => setNewMaterial({
+                                    ...newMaterial,
+                                    initialBufferSettings: {
+                                      ...newMaterial.initialBufferSettings!,
+                                      bufferType: e.target.value as 'input' | 'output' | 'both'
+                                    }
+                                  })}
+                                >
+                                  <MenuItem value="input">入力バッファー</MenuItem>
+                                  <MenuItem value="output">出力バッファー</MenuItem>
+                                  <MenuItem value="both">両方</MenuItem>
+                                </Select>
+                              </FormControl>
+
+                              <TextField
+                                label="最大容量"
+                                type="number"
+                                value={newMaterial.initialBufferSettings.maxCapacity || 100}
+                                onChange={(e) => setNewMaterial({
+                                  ...newMaterial,
+                                  initialBufferSettings: {
+                                    ...newMaterial.initialBufferSettings!,
+                                    maxCapacity: Number(e.target.value)
+                                  }
+                                })}
+                                inputProps={{ min: 1 }}
+                              />
+                            </Box>
+
+                            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mt: 2 }}>
+                              <TextField
+                                label="初期在庫数"
+                                type="number"
+                                value={newMaterial.initialBufferSettings.initialStock || 0}
+                                onChange={(e) => setNewMaterial({
+                                  ...newMaterial,
+                                  initialBufferSettings: {
+                                    ...newMaterial.initialBufferSettings!,
+                                    initialStock: Number(e.target.value)
+                                  }
+                                })}
+                                inputProps={{ min: 0 }}
+                              />
+                              <TextField
+                                label="安全在庫数"
+                                type="number"
+                                value={newMaterial.initialBufferSettings.safetyStock || 0}
+                                onChange={(e) => setNewMaterial({
+                                  ...newMaterial,
+                                  initialBufferSettings: {
+                                    ...newMaterial.initialBufferSettings!,
+                                    safetyStock: Number(e.target.value)
+                                  }
+                                })}
+                                inputProps={{ min: 0 }}
+                              />
+                            </Box>
+
+                            <TextField
+                              label="バッファー位置"
+                              value={newMaterial.initialBufferSettings.location || ''}
+                              onChange={(e) => setNewMaterial({
+                                ...newMaterial,
+                                initialBufferSettings: {
+                                  ...newMaterial.initialBufferSettings!,
+                                  location: e.target.value
+                                }
+                              })}
+                              fullWidth
+                              sx={{ mt: 2 }}
+                              placeholder="例: 工程前、工程後、倉庫Aなど"
+                            />
+
+                            <TextField
+                              label="備考"
+                              value={newMaterial.initialBufferSettings.notes || ''}
+                              onChange={(e) => setNewMaterial({
+                                ...newMaterial,
+                                initialBufferSettings: {
+                                  ...newMaterial.initialBufferSettings!,
+                                  notes: e.target.value
+                                }
+                              })}
+                              fullWidth
+                              multiline
+                              rows={2}
+                              sx={{ mt: 2 }}
+                              placeholder="バッファーに関する追加情報"
+                            />
+                          </>
                         )}
                       </Box>
 
@@ -691,6 +1027,7 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                           <TableCell>供給方法</TableCell>
                           <TableCell>品質・不良品</TableCell>
                           <TableCell>スケジューリング</TableCell>
+                          <TableCell>初期バッファー</TableCell>
                           <TableCell align="center">アクション</TableCell>
                         </TableRow>
                       </TableHead>
@@ -778,6 +1115,36 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                                       color="info" 
                                       variant="outlined"
                                     />
+                                  )}
+                                </Box>
+                              </TableCell>
+                              <TableCell>
+                                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                                  {material.initialBufferSettings?.enabled ? (
+                                    <>
+                                      <Chip 
+                                        label={`${material.initialBufferSettings.bufferType === 'input' ? '入力' : 
+                                               material.initialBufferSettings.bufferType === 'output' ? '出力' : '両方'}バッファー`}
+                                        size="small" 
+                                        color="primary" 
+                                        variant="outlined"
+                                      />
+                                      <Typography variant="caption" color="textSecondary">
+                                        初期: {material.initialBufferSettings.initialStock}
+                                      </Typography>
+                                      <Typography variant="caption" color="textSecondary">
+                                        最大: {material.initialBufferSettings.maxCapacity}
+                                      </Typography>
+                                      {material.initialBufferSettings.location && (
+                                        <Typography variant="caption" color="textSecondary">
+                                          位置: {material.initialBufferSettings.location}
+                                        </Typography>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <Typography variant="caption" color="textSecondary">
+                                      未設定
+                                    </Typography>
                                   )}
                                 </Box>
                               </TableCell>
