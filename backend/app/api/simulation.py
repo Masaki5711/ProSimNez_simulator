@@ -4,7 +4,7 @@
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from datetime import datetime
 import asyncio
 import os
@@ -29,6 +29,33 @@ simulation_task: Optional[asyncio.Task] = None
 master_simulator: Optional[MasterSimulator] = None
 simulation_results: Dict[str, SimulationResults] = {}
 
+# ネットワークベースシミュレーション用のグローバル変数
+network_based_simulator: Optional['NetworkBasedSimulator'] = None
+network_simulation_task: Optional[asyncio.Task] = None
+
+# ネットワークベースシミュレーション用の設定
+class NetworkSimulationConfig(BaseModel):
+    start_time: str
+    speed: float = 1.0
+    duration: float = 3600.0  # 1時間
+    network_data: dict  # フロントエンドから送信されるネットワークデータ
+    simulation_mode: str = "normal"  # "normal", "test", "optimization"
+    enable_scheduling_control: bool = True  # スケジューリング制御の有効/無効
+    enable_real_time_update: bool = True  # リアルタイム更新の有効/無効
+
+# ネットワークベースシミュレーション用の結果
+class NetworkSimulationResult(BaseModel):
+    simulation_id: str
+    status: str
+    start_time: str
+    end_time: str
+    duration: float
+    total_events: int
+    production_summary: dict
+    scheduling_analysis: dict
+    network_performance: dict
+    created_at: str
+
 class SimulationConfig(BaseModel):
     """シミュレーション設定"""
     start_time: str = "2024-01-01T08:00:00"
@@ -44,11 +71,11 @@ class SimulationStatus(BaseModel):
 
 # サンプル工場データを作成
 def create_sample_factory() -> Factory:
-    """サンプル工場を作成"""
+    """サンプル工場を作成（フェーズ2改良版）"""
     factory = Factory(
         id="sample_factory",
-        name="サンプル混流生産ライン",
-        description="デモ用の工場設定"
+        name="サンプル混流生産ライン（フェーズ2改良版）",
+        description="部品ごとのスケジューリング設定とストア計画管理を含むデモ用工場"
     )
     
     # 製品定義
@@ -62,7 +89,10 @@ def create_sample_factory() -> Factory:
     factory.add_product(sub_assy)
     factory.add_product(product_x)
     
-    # 工程定義
+    # 工程定義（スケジューリング設定付き）
+    from app.models.process import ProcessInput, KanbanSettings
+    
+    # 部品A加工工程（プッシュ型）
     proc_a = Process(
         id="PROC_PART_A",
         name="部品A加工",
@@ -72,6 +102,7 @@ def create_sample_factory() -> Factory:
     proc_a.add_equipment(Equipment(id="EQ_A_1", name="設備A1", process_id="PROC_PART_A"))
     proc_a.add_equipment(Equipment(id="EQ_A_2", name="設備A2", process_id="PROC_PART_A"))
     
+    # 部品B加工工程（プル型）
     proc_b = Process(
         id="PROC_PART_B",
         name="部品B加工",
@@ -80,6 +111,7 @@ def create_sample_factory() -> Factory:
     )
     proc_b.add_equipment(Equipment(id="EQ_B_1", name="設備B1", process_id="PROC_PART_B"))
     
+    # サブアッシ組立工程（かんばん型）
     proc_sub = Process(
         id="PROC_SUB_ASSY",
         name="サブアッシ組立",
@@ -88,6 +120,7 @@ def create_sample_factory() -> Factory:
     )
     proc_sub.add_equipment(Equipment(id="EQ_SUB_1", name="組立設備1", process_id="PROC_SUB_ASSY"))
     
+    # 最終組立工程（ハイブリッド型）
     proc_final = Process(
         id="PROC_FINAL",
         name="最終組立",
@@ -95,6 +128,79 @@ def create_sample_factory() -> Factory:
         processing_time={"PRODUCT_X": 180}
     )
     proc_final.add_equipment(Equipment(id="EQ_FINAL_1", name="最終組立設備", process_id="PROC_FINAL"))
+    
+    # 工程の入力材料設定（スケジューリング設定付き）
+    # サブアッシ組立工程の入力材料
+    proc_sub.inputs = [
+        ProcessInput(
+            from_process_id="PROC_PART_A",
+            product_id="PART_A",
+            required_quantity=2,
+            scheduling_mode="push",  # プッシュ型
+            batch_size=20,
+            min_batch_size=10,
+            max_batch_size=50,
+            input_buffer_id="BUF_PART_A",
+            safety_stock=5,
+            max_capacity=100
+        ),
+        ProcessInput(
+            from_process_id="PROC_PART_B",
+            product_id="PART_B",
+            required_quantity=1,
+            scheduling_mode="pull",  # プル型
+            batch_size=10,
+            min_batch_size=5,
+            max_batch_size=30,
+            input_buffer_id="BUF_PART_B",
+            safety_stock=3,
+            max_capacity=50,
+            kanban_settings=KanbanSettings(
+                enabled=True,
+                card_count=3,
+                reorder_point=8,
+                max_inventory=25,
+                supplier_lead_time=2,
+                kanban_type="withdrawal"
+            )
+        )
+    ]
+    
+    # 最終組立工程の入力材料
+    proc_final.inputs = [
+        ProcessInput(
+            from_process_id="PROC_SUB_ASSY",
+            product_id="SUB_ASSY_1",
+            required_quantity=1,
+            scheduling_mode="hybrid",  # ハイブリッド型
+            batch_size=5,
+            min_batch_size=1,
+            max_batch_size=10,
+            input_buffer_id="BUF_SUB_ASSY",
+            safety_stock=2,
+            max_capacity=20,
+            kanban_settings=KanbanSettings(
+                enabled=True,
+                card_count=2,
+                reorder_point=3,
+                max_inventory=15,
+                supplier_lead_time=1,
+                kanban_type="production"
+            )
+        ),
+        ProcessInput(
+            from_process_id="PROC_PART_A",
+            product_id="PART_A",
+            required_quantity=1,
+            scheduling_mode="push",  # プッシュ型
+            batch_size=10,
+            min_batch_size=5,
+            max_batch_size=20,
+            input_buffer_id="BUF_PART_A",
+            safety_stock=3,
+            max_capacity=50
+        )
+    ]
     
     factory.add_process(proc_a)
     factory.add_process(proc_b)
@@ -575,3 +681,699 @@ def get_master_simulator() -> Optional[MasterSimulator]:
     """現在のマスターシミュレータを取得"""
     global master_simulator
     return master_simulator
+
+@router.post("/start-network-simulation")
+async def start_network_simulation(config: NetworkSimulationConfig, background_tasks: BackgroundTasks):
+    """ネットワークベースシミュレーションを開始"""
+    global network_based_simulator, network_simulation_task
+    
+    try:
+        # 既存のシミュレーションを停止
+        if network_based_simulator and hasattr(network_based_simulator, 'is_running') and network_based_simulator.is_running:
+            await network_based_simulator.stop()
+            
+        if network_simulation_task and not network_simulation_task.done():
+            network_simulation_task.cancel()
+        
+        # ネットワークベースシミュレーターを作成
+        from app.core.network_simulator import NetworkBasedSimulator
+        
+        network_based_simulator = NetworkBasedSimulator(
+            network_data=config.network_data,
+            start_time=datetime.fromisoformat(config.start_time.replace('Z', '+00:00')),
+            speed=config.speed,
+            enable_scheduling_control=config.enable_scheduling_control,
+            enable_real_time_update=config.enable_real_time_update
+        )
+        
+        # シミュレーションを開始
+        network_simulation_task = asyncio.create_task(
+            network_based_simulator.run_simulation(duration=config.duration)
+        )
+        
+        # バックグラウンドタスクとしてシミュレーション監視を開始
+        background_tasks.add_task(
+            monitor_network_simulation,
+            network_based_simulator,
+            config.duration
+        )
+        
+        return {
+            "status": "success",
+            "message": "ネットワークベースシミュレーションを開始しました",
+            "simulation_id": network_based_simulator.simulation_id,
+            "start_time": config.start_time,
+            "duration": config.duration
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"シミュレーション開始エラー: {str(e)}")
+
+@router.get("/network-simulation/status")
+async def get_network_simulation_status():
+    """ネットワークベースシミュレーションの状態を取得"""
+    global network_based_simulator
+    
+    if not network_based_simulator:
+        return {"status": "not_started", "message": "シミュレーションが開始されていません"}
+    
+    return {
+        "status": network_based_simulator.get_status(),
+        "simulation_id": network_based_simulator.simulation_id,
+        "current_time": network_based_simulator.get_current_time(),
+        "progress": network_based_simulator.get_progress(),
+        "production_summary": network_based_simulator.get_production_summary(),
+        "scheduling_analysis": network_based_simulator.get_scheduling_analysis()
+    }
+
+@router.post("/network-simulation/stop")
+async def stop_network_simulation():
+    """ネットワークベースシミュレーションを停止"""
+    global network_based_simulator, network_simulation_task
+    
+    try:
+        if network_based_simulator:
+            await network_based_simulator.stop()
+            
+        if network_simulation_task and not network_simulation_task.done():
+            network_simulation_task.cancel()
+            
+        return {"status": "success", "message": "シミュレーションを停止しました"}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"シミュレーション停止エラー: {str(e)}")
+
+@router.get("/network-simulation/results")
+async def get_network_simulation_results():
+    """ネットワークベースシミュレーションの結果を取得"""
+    global network_based_simulator
+    
+    if not network_based_simulator:
+        raise HTTPException(status_code=404, detail="シミュレーション結果が見つかりません")
+    
+    try:
+        results = network_based_simulator.get_simulation_results()
+        return results
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"結果取得エラー: {str(e)}")
+
+@router.post("/network-simulation/validate")
+async def validate_network_data(network_data: dict):
+    """ネットワークデータの妥当性を検証"""
+    try:
+        validation_result = {
+            "is_valid": True,
+            "errors": [],
+            "warnings": [],
+            "summary": {}
+        }
+        
+        # ノードの検証
+        nodes = network_data.get('nodes', [])
+        validation_result["summary"]["total_nodes"] = len(nodes)
+        
+        # 工程ノードの検証
+        process_nodes = [n for n in nodes if n.get('type') in ['machining', 'assembly', 'inspection']]
+        validation_result["summary"]["process_nodes"] = len(process_nodes)
+        
+        # エッジの検証
+        edges = network_data.get('edges', [])
+        validation_result["summary"]["total_edges"] = len(edges)
+        
+        # 接続性の検証
+        connected_nodes = set()
+        for edge in edges:
+            connected_nodes.add(edge.get('source'))
+            connected_nodes.add(edge.get('target'))
+        
+        # 孤立ノードの検出
+        all_node_ids = {n.get('id') for n in nodes}
+        isolated_nodes = all_node_ids - connected_nodes
+        
+        if isolated_nodes:
+            validation_result["warnings"].append({
+                "type": "isolated_nodes",
+                "message": f"孤立ノードが検出されました: {list(isolated_nodes)}",
+                "severity": "warning"
+            })
+        
+        # 循環参照の検出
+        if network_based_simulator._detect_cycles(edges):
+            validation_result["errors"].append({
+                "type": "circular_reference",
+                "message": "循環参照が検出されました",
+                "severity": "error"
+            })
+            validation_result["is_valid"] = False
+        
+        # 材料フローの検証
+        flow_validation = network_based_simulator._validate_material_flow(nodes, edges)
+        validation_result["summary"]["material_flow"] = flow_validation
+        
+        if not flow_validation["is_valid"]:
+            validation_result["errors"].extend(flow_validation["errors"])
+            validation_result["is_valid"] = False
+        
+        return validation_result
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"検証エラー: {str(e)}")
+
+@router.post("/network-simulation/convert")
+async def convert_network_data(network_data: dict):
+    """ネットワークデータをシミュレーション用に変換"""
+    try:
+        # ネットワークデータの変換
+        converted_data = {
+            "nodes": [],
+            "edges": [],
+            "products": [],
+            "bom_items": [],
+            "metadata": {
+                "conversion_timestamp": datetime.now().isoformat(),
+                "version": "1.0"
+            }
+        }
+        
+        # ノードの変換
+        for node in network_data.get('nodes', []):
+            converted_node = {
+                "id": node.get('id'),
+                "type": node.get('type', 'unknown'),
+                "data": network_based_simulator._convert_node_data(node.get('data', {})),
+                "position": node.get('position')
+            }
+            converted_data["nodes"].append(converted_node)
+        
+        # エッジの変換
+        for edge in network_data.get('edges', []):
+            converted_edge = {
+                "id": edge.get('id'),
+                "source": edge.get('source'),
+                "target": edge.get('target'),
+                "data": network_based_simulator._convert_edge_data(edge.get('data', {}))
+            }
+            converted_data["edges"].append(converted_edge)
+        
+        # 製品情報の変換
+        converted_data["products"] = network_based_simulator._extract_products(network_data)
+        
+        # BOM情報の変換
+        converted_data["bom_items"] = network_based_simulator._extract_bom_items(network_data)
+        
+        return {
+            "status": "success",
+            "converted_data": converted_data,
+            "conversion_summary": {
+                "nodes_converted": len(converted_data["nodes"]),
+                "edges_converted": len(converted_data["edges"]),
+                "products_extracted": len(converted_data["products"]),
+                "bom_items_extracted": len(converted_data["bom_items"])
+            }
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"変換エラー: {str(e)}")
+
+@router.get("/network-simulation/sample-data")
+async def get_sample_network_data():
+    """テスト用のサンプルネットワークデータを生成"""
+    sample_data = {
+        "nodes": [
+            {
+                "id": "node_machining_1",
+                "type": "machining",
+                "position": {"x": 100, "y": 100},
+                "data": {
+                    "label": "部品A加工",
+                    "cycleTime": 30,
+                    "setupTime": 60,
+                    "equipmentCount": 2,
+                    "operatorCount": 1,
+                    "inputBufferCapacity": 50,
+                    "outputBufferCapacity": 50,
+                    "defectRate": 2.0,
+                    "reworkRate": 1.0,
+                    "operatingCost": 100,
+                    "schedulingMode": "push",
+                    "batchSize": 20,
+                    "minBatchSize": 10,
+                    "maxBatchSize": 50
+                }
+            },
+            {
+                "id": "node_machining_2",
+                "type": "machining",
+                "position": {"x": 300, "y": 100},
+                "data": {
+                    "label": "部品B加工",
+                    "cycleTime": 45,
+                    "setupTime": 90,
+                    "equipmentCount": 1,
+                    "operatorCount": 1,
+                    "inputBufferCapacity": 30,
+                    "outputBufferCapacity": 30,
+                    "defectRate": 1.5,
+                    "reworkRate": 0.5,
+                    "operatingCost": 80,
+                    "schedulingMode": "pull",
+                    "batchSize": 15,
+                    "minBatchSize": 5,
+                    "maxBatchSize": 30,
+                    "kanbanEnabled": True,
+                    "kanbanCardCount": 3,
+                    "reorderPoint": 8,
+                    "maxInventory": 25,
+                    "supplierLeadTime": 2,
+                    "kanbanType": "withdrawal"
+                }
+            },
+            {
+                "id": "node_assembly_1",
+                "type": "assembly",
+                "position": {"x": 200, "y": 250},
+                "data": {
+                    "label": "サブアッシ組立",
+                    "cycleTime": 120,
+                    "setupTime": 180,
+                    "equipmentCount": 1,
+                    "operatorCount": 2,
+                    "inputBufferCapacity": 40,
+                    "outputBufferCapacity": 40,
+                    "defectRate": 1.0,
+                    "reworkRate": 0.8,
+                    "operatingCost": 150,
+                    "schedulingMode": "hybrid",
+                    "batchSize": 10,
+                    "minBatchSize": 5,
+                    "maxBatchSize": 20,
+                    "kanbanEnabled": True,
+                    "kanbanCardCount": 2,
+                    "reorderPoint": 5,
+                    "maxInventory": 20,
+                    "supplierLeadTime": 1,
+                    "kanbanType": "production"
+                }
+            },
+            {
+                "id": "node_assembly_2",
+                "type": "assembly",
+                "position": {"x": 400, "y": 250},
+                "data": {
+                    "label": "最終組立",
+                    "cycleTime": 180,
+                    "setupTime": 240,
+                    "equipmentCount": 1,
+                    "operatorCount": 2,
+                    "inputBufferCapacity": 30,
+                    "outputBufferCapacity": 30,
+                    "defectRate": 0.5,
+                    "reworkRate": 0.3,
+                    "operatingCost": 200,
+                    "schedulingMode": "push",
+                    "batchSize": 5,
+                    "minBatchSize": 1,
+                    "maxBatchSize": 10
+                }
+            },
+            {
+                "id": "node_inspection_1",
+                "type": "inspection",
+                "position": {"x": 500, "y": 100},
+                "data": {
+                    "label": "最終検査",
+                    "cycleTime": 60,
+                    "setupTime": 30,
+                    "equipmentCount": 1,
+                    "operatorCount": 1,
+                    "inputBufferCapacity": 20,
+                    "outputBufferCapacity": 20,
+                    "defectRate": 0.0,
+                    "reworkRate": 0.0,
+                    "operatingCost": 50,
+                    "schedulingMode": "pull",
+                    "batchSize": 5,
+                    "minBatchSize": 1,
+                    "maxBatchSize": 10
+                }
+            }
+        ],
+        "edges": [
+            {
+                "id": "edge_1",
+                "source": "node_machining_1",
+                "target": "node_assembly_1",
+                "data": {
+                    "transportTime": 15,
+                    "transportLotSize": 20,
+                    "transportCost": 5,
+                    "distance": 50,
+                    "transportType": "conveyor",
+                    "maxCapacity": 100
+                }
+            },
+            {
+                "id": "edge_2",
+                "source": "node_machining_2",
+                "target": "node_assembly_1",
+                "data": {
+                    "transportTime": 20,
+                    "transportLotSize": 15,
+                    "transportCost": 8,
+                    "distance": 80,
+                    "transportType": "agv",
+                    "maxCapacity": 50
+                }
+            },
+            {
+                "id": "edge_3",
+                "source": "node_assembly_1",
+                "target": "node_assembly_2",
+                "data": {
+                    "transportTime": 25,
+                    "transportLotSize": 10,
+                    "transportCost": 10,
+                    "distance": 100,
+                    "transportType": "conveyor",
+                    "maxCapacity": 30
+                }
+            },
+            {
+                "id": "edge_4",
+                "source": "node_assembly_2",
+                "target": "node_inspection_1",
+                "data": {
+                    "transportTime": 10,
+                    "transportLotSize": 5,
+                    "transportCost": 3,
+                    "distance": 30,
+                    "transportType": "manual",
+                    "maxCapacity": 20
+                }
+            }
+        ],
+        "products": [
+            {
+                "id": "PRODUCT_PART_A",
+                "name": "部品A",
+                "type": "component",
+                "processing_time": 30,
+                "source_process": "node_machining_1"
+            },
+            {
+                "id": "PRODUCT_PART_B",
+                "name": "部品B",
+                "type": "component",
+                "processing_time": 45,
+                "source_process": "node_machining_2"
+            },
+            {
+                "id": "PRODUCT_SUB_ASSY",
+                "name": "サブアッシ",
+                "type": "subassembly",
+                "processing_time": 120,
+                "source_process": "node_assembly_1"
+            },
+            {
+                "id": "PRODUCT_FINAL",
+                "name": "最終製品",
+                "type": "finished_product",
+                "processing_time": 180,
+                "source_process": "node_assembly_2"
+            }
+        ],
+        "bom_items": [
+            {
+                "id": "BOM_1",
+                "parent_product": "PRODUCT_SUB_ASSY",
+                "child_product": "PRODUCT_PART_A",
+                "quantity": 2,
+                "source_edge": "edge_1"
+            },
+            {
+                "id": "BOM_2",
+                "parent_product": "PRODUCT_SUB_ASSY",
+                "child_product": "PRODUCT_PART_B",
+                "quantity": 1,
+                "source_edge": "edge_2"
+            },
+            {
+                "id": "BOM_3",
+                "parent_product": "PRODUCT_FINAL",
+                "child_product": "PRODUCT_SUB_ASSY",
+                "quantity": 1,
+                "source_edge": "edge_3"
+            }
+        ]
+    }
+    
+    return {
+        "status": "success",
+        "sample_data": sample_data,
+        "description": "テスト用のサンプルネットワークデータ（5工程、4接続、4製品、3BOM関係）",
+        "features": [
+            "プッシュ型制御（部品A加工、最終組立）",
+            "プル型制御（部品B加工、最終検査）",
+            "ハイブリッド型制御（サブアッシ組立）",
+            "かんばん制御（部品B加工、サブアッシ組立）",
+            "複数搬送方式（コンベヤ、AGV、手動）"
+        ]
+    }
+
+def _detect_cycles(self, edges: List[dict]) -> bool:
+    """循環参照を検出"""
+    # 簡易的な循環参照検出
+    # 実際の実装では、より高度なアルゴリズムを使用
+    graph = {}
+    for edge in edges:
+        source = edge.get('source')
+        target = edge.get('target')
+        if source not in graph:
+            graph[source] = []
+        graph[source].append(target)
+    
+    # 深さ優先探索で循環を検出
+    visited = set()
+    rec_stack = set()
+    
+    def has_cycle(node):
+        if node in rec_stack:
+            return True
+        if node in visited:
+            return False
+        
+        visited.add(node)
+        rec_stack.add(node)
+        
+        for neighbor in graph.get(node, []):
+            if has_cycle(neighbor):
+                return True
+        
+        rec_stack.remove(node)
+        return False
+    
+    for node in graph:
+        if has_cycle(node):
+            return True
+    
+    return False
+
+def _validate_material_flow(self, nodes: List[dict], edges: List[dict]) -> dict:
+    """材料フローの妥当性を検証"""
+    validation = {
+        "is_valid": True,
+        "errors": [],
+        "warnings": []
+    }
+    
+    # 工程ノードの検証
+    process_nodes = [n for n in nodes if n.get('type') in ['machining', 'assembly', 'inspection']]
+    
+    for process_node in process_nodes:
+        node_id = process_node.get('id')
+        node_data = process_node.get('data', {})
+        
+        # 必須パラメータの検証
+        required_params = ['cycleTime', 'equipmentCount']
+        for param in required_params:
+            if param not in node_data:
+                validation["errors"].append({
+                    "node_id": node_id,
+                    "param": param,
+                    "message": f"必須パラメータ '{param}' が設定されていません",
+                    "severity": "error"
+                })
+                validation["is_valid"] = False
+        
+        # 数値パラメータの妥当性検証
+        if 'cycleTime' in node_data:
+            cycle_time = node_data['cycleTime']
+            if not isinstance(cycle_time, (int, float)) or cycle_time <= 0:
+                validation["errors"].append({
+                    "node_id": node_id,
+                    "param": "cycleTime",
+                    "message": f"サイクルタイムは正の数値である必要があります: {cycle_time}",
+                    "severity": "error"
+                })
+                validation["is_valid"] = False
+        
+        if 'equipmentCount' in node_data:
+            equipment_count = node_data['equipmentCount']
+            if not isinstance(equipment_count, int) or equipment_count <= 0:
+                validation["errors"].append({
+                    "node_id": node_id,
+                    "param": "equipmentCount",
+                    "message": f"設備数は正の整数である必要があります: {equipment_count}",
+                    "severity": "error"
+                })
+                validation["is_valid"] = False
+    
+    # 接続関係の検証
+    for edge in edges:
+        source_id = edge.get('source')
+        target_id = edge.get('target')
+        
+        # 存在しないノードへの接続
+        source_exists = any(n.get('id') == source_id for n in nodes)
+        target_exists = any(n.get('id') == target_id for n in nodes)
+        
+        if not source_exists:
+            validation["errors"].append({
+                "edge_id": edge.get('id'),
+                "message": f"接続元ノード '{source_id}' が存在しません",
+                "severity": "error"
+            })
+            validation["is_valid"] = False
+        
+        if not target_exists:
+            validation["errors"].append({
+                "edge_id": edge.get('id'),
+                "message": f"接続先ノード '{target_id}' が存在しません",
+                "severity": "error"
+            })
+            validation["is_valid"] = False
+    
+    return validation
+
+def _convert_node_data(self, node_data: dict) -> dict:
+    """ノードデータをシミュレーション用に変換"""
+    converted = {}
+    
+    # 基本パラメータの変換
+    param_mapping = {
+        'cycleTime': 'cycleTime',
+        'setupTime': 'setupTime',
+        'equipmentCount': 'equipmentCount',
+        'operatorCount': 'operatorCount',
+        'inputBufferCapacity': 'inputBufferCapacity',
+        'outputBufferCapacity': 'outputBufferCapacity',
+        'defectRate': 'defectRate',
+        'reworkRate': 'reworkRate',
+        'operatingCost': 'operatingCost'
+    }
+    
+    for source_key, target_key in param_mapping.items():
+        if source_key in node_data:
+            converted[target_key] = node_data[source_key]
+    
+    # スケジューリング設定の変換
+    if 'schedulingMode' in node_data:
+        converted['schedulingMode'] = node_data['schedulingMode']
+    
+    if 'batchSize' in node_data:
+        converted['batchSize'] = node_data['batchSize']
+    
+    if 'minBatchSize' in node_data:
+        converted['minBatchSize'] = node_data['minBatchSize']
+    
+    if 'maxBatchSize' in node_data:
+        converted['maxBatchSize'] = node_data['maxBatchSize']
+    
+    # かんばん設定の変換
+    if node_data.get('kanbanEnabled', False):
+        converted['kanbanEnabled'] = True
+        converted['kanbanCardCount'] = node_data.get('kanbanCardCount', 5)
+        converted['reorderPoint'] = node_data.get('reorderPoint', 10)
+        converted['maxInventory'] = node_data.get('maxInventory', 50)
+        converted['supplierLeadTime'] = node_data.get('supplierLeadTime', 3)
+        converted['kanbanType'] = node_data.get('kanbanType', 'production')
+    
+    return converted
+
+def _convert_edge_data(self, edge_data: dict) -> dict:
+    """エッジデータをシミュレーション用に変換"""
+    converted = {}
+    
+    # 搬送設定の変換
+    param_mapping = {
+        'transportTime': 'transportTime',
+        'transportLotSize': 'transportLotSize',
+        'transportCost': 'transportCost',
+        'distance': 'distance',
+        'transportType': 'transportType',
+        'maxCapacity': 'maxCapacity'
+    }
+    
+    for source_key, target_key in param_mapping.items():
+        if source_key in edge_data:
+            converted[target_key] = edge_data[source_key]
+    
+    return converted
+
+def _extract_products(self, network_data: dict) -> List[dict]:
+    """ネットワークデータから製品情報を抽出"""
+    products = []
+    
+    # ノードから製品情報を抽出
+    for node in network_data.get('nodes', []):
+        if node.get('type') in ['machining', 'assembly', 'inspection']:
+            node_data = node.get('data', {})
+            
+            product = {
+                "id": f"PRODUCT_{node.get('id')}",
+                "name": node_data.get('label', f'Product {node.get("id")}'),
+                "type": "component" if node.get('type') == 'machining' else "assembly",
+                "processing_time": node_data.get('cycleTime', 60),
+                "source_process": node.get('id')
+            }
+            products.append(product)
+    
+    return products
+
+def _extract_bom_items(self, network_data: dict) -> List[dict]:
+    """ネットワークデータからBOM情報を抽出"""
+    bom_items = []
+    
+    # エッジからBOM関係を抽出
+    for edge in network_data.get('edges', []):
+        source_node = next((n for n in network_data.get('nodes', []) if n.get('id') == edge.get('source')), None)
+        target_node = next((n for n in network_data.get('nodes', []) if n.get('id') == edge.get('target')), None)
+        
+        if source_node and target_node:
+            bom_item = {
+                "id": f"BOM_{edge.get('id')}",
+                "parent_product": f"PRODUCT_{target_node.get('id')}",
+                "child_product": f"PRODUCT_{source_node.get('id')}",
+                "quantity": 1,  # デフォルト値
+                "source_edge": edge.get('id')
+            }
+            bom_items.append(bom_item)
+    
+    return bom_items
+
+async def monitor_network_simulation(simulator: 'NetworkBasedSimulator', duration: float):
+    """ネットワークベースシミュレーションの監視"""
+    try:
+        # シミュレーション完了まで待機
+        await asyncio.sleep(duration)
+        
+        # 完了後の処理
+        if simulator.is_running:
+            await simulator.stop()
+            
+    except asyncio.CancelledError:
+        # タスクがキャンセルされた場合
+        pass
+    except Exception as e:
+        print(f"シミュレーション監視エラー: {e}")

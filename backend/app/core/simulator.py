@@ -64,6 +64,20 @@ class SimulationEngine:
                 "process_flow_diagram": [],
                 "resource_utilization_chart": [],
                 "inventory_levels_chart": []
+            },
+            # フェーズ2改良版: スケジューリング制御の詳細ログ
+            "scheduling_control_log": {
+                "push_control_events": [],      # プッシュ型制御イベント
+                "pull_control_events": [],      # プル型制御イベント
+                "kanban_control_events": [],    # かんばん制御イベント
+                "hybrid_control_events": [],    # ハイブリッド制御イベント
+                "material_flow_analysis": [],   # 材料フロー分析
+                "scheduling_efficiency": []     # スケジューリング効率
+            },
+            "store_planning_log": {
+                "production_schedule_execution": [],  # 生産計画実行状況
+                "inventory_level_monitoring": [],     # 在庫レベル監視
+                "plan_vs_actual_analysis": []        # 計画と実績の比較
             }
         }
         
@@ -94,12 +108,127 @@ class SimulationEngine:
             "simulation_time": self.env.now,
             "event_type": event.event_type,
             "process_id": getattr(event, 'process_id', None),
-            "equipment_id": getattr(event, 'equipment_id', None),
-            "product_id": getattr(event, 'product_id', None),
+            "equipment_id": getattr(event, 'process_id', None),
+            "product_id": getattr(event, 'process_id', None),
             "data": event.data or {},
             "description": self._generate_event_description(event)
         }
+        
         self.phase2_test_log["detailed_events"].append(event_record)
+        
+        # スケジューリング制御の詳細ログ記録
+        self._log_scheduling_control_event(event)
+    
+    def _log_scheduling_control_event(self, event: SimulationEvent):
+        """スケジューリング制御イベントの詳細ログ記録"""
+        if not event.process_id:
+            return
+            
+        process = self.factory.processes.get(event.process_id)
+        if not process:
+            return
+            
+        current_time = self.get_current_datetime()
+        sim_time = self.env.now
+        
+        # 材料フロー分析の記録
+        material_flow_record = {
+            "timestamp": current_time.isoformat(),
+            "simulation_time": sim_time,
+            "process_id": event.process_id,
+            "process_name": process.name,
+            "event_type": event.event_type,
+            "scheduling_analysis": {}
+        }
+        
+        # 各入力材料のスケジューリング制御状況を分析
+        for input_material in process.inputs:
+            material_id = input_material.product_id
+            scheduling_mode = input_material.scheduling_mode
+            
+            # バッファの現在状況を取得
+            buffer_id = input_material.input_buffer_id
+            current_stock = 0
+            if buffer_id and buffer_id in self.factory.buffers:
+                current_stock = self.factory.buffers[buffer_id].get_total_quantity()
+            
+            # 制御方式別の分析
+            control_analysis = {
+                "material_id": material_id,
+                "scheduling_mode": scheduling_mode,
+                "current_stock": current_stock,
+                "required_quantity": input_material.required_quantity,
+                "batch_size": input_material.batch_size,
+                "safety_stock": input_material.safety_stock,
+                "max_capacity": input_material.max_capacity,
+                "control_status": self._analyze_control_status(input_material, current_stock)
+            }
+            
+            material_flow_record["scheduling_analysis"][material_id] = control_analysis
+            
+            # 制御方式別のイベントログに記録
+            if scheduling_mode == "push":
+                self.phase2_test_log["scheduling_control_log"]["push_control_events"].append({
+                    "timestamp": current_time.isoformat(),
+                    "simulation_time": sim_time,
+                    "process_id": event.process_id,
+                    "material_id": material_id,
+                    "control_analysis": control_analysis
+                })
+            elif scheduling_mode == "pull":
+                self.phase2_test_log["scheduling_control_log"]["pull_control_events"].append({
+                    "timestamp": current_time.isoformat(),
+                    "simulation_time": sim_time,
+                    "process_id": event.process_id,
+                    "material_id": material_id,
+                    "control_analysis": control_analysis
+                })
+            elif scheduling_mode == "hybrid":
+                self.phase2_test_log["scheduling_control_log"]["hybrid_control_events"].append({
+                    "timestamp": current_time.isoformat(),
+                    "simulation_time": sim_time,
+                    "process_id": event.process_id,
+                    "material_id": material_id,
+                    "control_analysis": control_analysis
+                })
+            
+            # かんばん制御の記録
+            if input_material.kanban_settings and input_material.kanban_settings.enabled:
+                kanban_record = {
+                    "timestamp": current_time.isoformat(),
+                    "simulation_time": sim_time,
+                    "process_id": event.process_id,
+                    "material_id": material_id,
+                    "kanban_type": input_material.kanban_settings.kanban_type,
+                    "current_stock": current_stock,
+                    "reorder_point": input_material.kanban_settings.reorder_point,
+                    "max_inventory": input_material.kanban_settings.max_inventory,
+                    "kanban_status": self._analyze_kanban_status(input_material.kanban_settings, current_stock)
+                }
+                self.phase2_test_log["scheduling_control_log"]["kanban_control_events"].append(kanban_record)
+        
+        # 材料フロー分析に記録
+        self.phase2_test_log["scheduling_control_log"]["material_flow_analysis"].append(material_flow_record)
+    
+    def _analyze_control_status(self, input_material, current_stock: int) -> str:
+        """制御状況を分析"""
+        if current_stock >= input_material.required_quantity:
+            return "sufficient"  # 十分
+        elif current_stock >= input_material.safety_stock:
+            return "adequate"     # 適正
+        elif current_stock > 0:
+            return "low"          # 低い
+        else:
+            return "empty"        # 空
+    
+    def _analyze_kanban_status(self, kanban_settings, current_stock: int) -> str:
+        """かんばん状況を分析"""
+        if current_stock <= kanban_settings.reorder_point:
+            return "reorder_needed"  # 発注必要
+        elif current_stock >= kanban_settings.max_inventory:
+            return "overstocked"     # 過剰在庫
+        else:
+            return "normal"           # 正常
         
     def _generate_event_description(self, event: SimulationEvent) -> str:
         """イベントの詳細説明を生成"""
@@ -1123,48 +1252,145 @@ class SimulationEngine:
         """HTML形式のビジュアルレポートを生成"""
         log = self.phase2_test_log
         
+        # テンプレート用の変数を準備
+        test_start_time = log.get('test_start_time', 'N/A')
+        test_end_time = log.get('test_end_time', 'N/A')
+        total_events = len(log.get('detailed_events', []))
+        total_states = len(log.get('process_states', []))
+        
         # HTMLテンプレート
-        html_content = f"""
+        html_content = """
 <!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>フェーズ２テストレポート - {timestamp}</title>
+    <title>フェーズ２テストレポート - """ + timestamp + """</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }}
-        .container {{ max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
-        .header {{ text-align: center; margin-bottom: 30px; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 8px; }}
-        .metric-card {{ background: white; padding: 20px; margin: 15px 0; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); border-left: 4px solid #667eea; }}
-        .chart-container {{ position: relative; height: 400px; margin: 20px 0; }}
-        .status-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin: 20px 0; }}
-        .status-card {{ background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }}
-        .alert {{ border-left-color: #ff6b6b; }}
-        .warning {{ border-left-color: #ffd93d; }}
-        .success {{ border-left-color: #6bcf7f; }}
-        .bottleneck {{ border-left-color: #ff8e53; }}
-        .real-time {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 8px; margin: 20px 0; }}
-        .real-time h3 {{ margin-top: 0; }}
-        .metric-value {{ font-size: 2em; font-weight: bold; margin: 10px 0; }}
-        .progress-bar {{ width: 100%; height: 20px; background: #e0e0e0; border-radius: 10px; overflow: hidden; }}
-        .progress-fill {{ height: 100%; background: linear-gradient(90deg, #667eea, #764ba2); transition: width 0.3s ease; }}
-        .event-timeline {{ max-height: 400px; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 8px; padding: 20px; }}
-        .event-item {{ padding: 10px; margin: 5px 0; background: #f8f9fa; border-left: 3px solid #667eea; border-radius: 4px; }}
-        .event-time {{ color: #666; font-size: 0.9em; }}
-        .event-type {{ font-weight: bold; color: #333; }}
-        .event-desc {{ color: #555; margin-top: 5px; }}
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 15px; margin-bottom: 30px; text-align: center; }
+        .header h1 { margin: 0; font-size: 2.5em; font-weight: 300; }
+        .header p { margin: 10px 0 0 0; opacity: 0.9; font-size: 1.1em; }
+        
+        .metric-card { background: white; border-radius: 15px; padding: 25px; margin-bottom: 25px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); }
+        .metric-card h3 { margin: 0 0 20px 0; color: #333; font-size: 1.4em; border-bottom: 2px solid #667eea; padding-bottom: 10px; }
+        
+        .status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; }
+        .status-card { background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); border-radius: 12px; padding: 20px; text-align: center; border-left: 4px solid #667eea; }
+        .status-card h4 { margin: 0 0 15px 0; color: #495057; font-size: 1.1em; }
+        .metric-value { font-size: 2.5em; font-weight: bold; color: #667eea; margin: 10px 0; }
+        .status-card p { margin: 5px 0; color: #6c757d; font-size: 0.9em; }
+        
+        .progress-bar { background: #e9ecef; border-radius: 10px; height: 8px; margin: 15px 0; overflow: hidden; }
+        .progress-fill { background: linear-gradient(90deg, #667eea, #764ba2); height: 100%; border-radius: 10px; transition: width 0.3s ease; }
+        
+        .bottleneck { border-left-color: #dc3545; }
+        .success { border-left-color: #28a745; }
+        .warning { border-left-color: #ffc107; }
+        .alert { border-left-color: #dc3545; }
+        .info { border-left-color: #17a2b8; }
+        
+        .chart-container { height: 300px; margin: 20px 0; }
+        
+        .event-timeline { max-height: 400px; overflow-y: auto; }
+        .event-item { background: #f8f9fa; border-radius: 8px; padding: 15px; margin: 10px 0; border-left: 3px solid #667eea; }
+        .event-time { color: #6c757d; font-size: 0.8em; margin-bottom: 5px; }
+        .event-description { color: #333; font-weight: 500; }
+        
+        .summary-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin: 20px 0; }
+        .summary-stat { background: #f8f9fa; border-radius: 10px; padding: 15px; text-align: center; }
+        .summary-stat-value { font-size: 1.8em; font-weight: bold; color: #667eea; }
+        .summary-stat-label { color: #6c757d; font-size: 0.9em; margin-top: 5px; }
+        
+        /* フェーズ2改良版: スケジューリング制御分析用スタイル */
+        .scheduling-analysis { margin-top: 20px; }
+        .control-summary { margin-bottom: 25px; }
+        .control-summary h4 { color: #495057; margin-bottom: 15px; }
+        .control-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; }
+        .control-stat { background: #f8f9fa; border-radius: 10px; padding: 15px; text-align: center; display: flex; flex-direction: column; align-items: center; }
+        .control-type { padding: 5px 12px; border-radius: 20px; font-size: 0.8em; font-weight: bold; margin-bottom: 8px; }
+        .control-type.push { background: #e3f2fd; color: #1976d2; }
+        .control-type.pull { background: #f3e5f5; color: #7b1fa2; }
+        .control-type.kanban { background: #e8f5e8; color: #388e3c; }
+        .control-type.hybrid { background: #fff3e0; color: #f57c00; }
+        .control-count { font-size: 1.5em; font-weight: bold; color: #333; }
+        
+        .material-flow-analysis { margin-bottom: 25px; }
+        .material-flow-analysis h4 { color: #495057; margin-bottom: 15px; }
+        .flow-details { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; }
+        .material-flow-item { background: #f8f9fa; border-radius: 10px; padding: 20px; border-left: 4px solid; }
+        .material-flow-item.success { border-left-color: #28a745; }
+        .material-flow-item.info { border-left-color: #17a2b8; }
+        .material-flow-item.warning { border-left-color: #ffc107; }
+        .material-flow-item.alert { border-left-color: #dc3545; }
+        .material-flow-item h5 { margin: 0 0 15px 0; color: #333; font-size: 1.1em; }
+        .flow-details-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .flow-detail { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #e9ecef; }
+        .flow-detail:last-child { border-bottom: none; }
+        .flow-detail .label { color: #6c757d; font-size: 0.9em; }
+        .flow-detail .value { font-weight: 500; color: #333; }
+        .status-sufficient { color: #28a745; font-weight: bold; }
+        .status-adequate { color: #17a2b8; font-weight: bold; }
+        .status-low { color: #ffc107; font-weight: bold; }
+        .status-empty { color: #dc3545; font-weight: bold; }
+        
+        .kanban-analysis { margin-bottom: 25px; }
+        .kanban-analysis h4 { color: #495057; margin-bottom: 15px; }
+        .kanban-details { background: #f8f9fa; border-radius: 10px; padding: 20px; }
+        .kanban-item { display: flex; flex-direction: column; gap: 10px; }
+        .kanban-item .material-id { font-weight: bold; color: #333; font-size: 1.1em; }
+        .kanban-item .kanban-type { background: #e8f5e8; color: #388e3c; padding: 5px 12px; border-radius: 15px; font-size: 0.8em; font-weight: bold; align-self: flex-start; }
+        .kanban-item .kanban-status { padding: 5px 12px; border-radius: 15px; font-size: 0.8em; font-weight: bold; align-self: flex-start; }
+        .status-reorder_needed { background: #fff3e0; color: #f57c00; }
+        .status-overstocked { background: #ffebee; color: #d32f2f; }
+        .status-normal { background: #e8f5e8; color: #388e3c; }
+        .kanban-metrics { display: flex; gap: 15px; flex-wrap: wrap; }
+        .kanban-metrics span { background: #e9ecef; color: #495057; padding: 5px 10px; border-radius: 8px; font-size: 0.8em; }
+        
+        @media (max-width: 768px) {
+            .status-grid { grid-template-columns: 1fr; }
+            .control-stats { grid-template-columns: repeat(2, 1fr); }
+            .flow-details { grid-template-columns: 1fr; }
+            .flow-details-grid { grid-template-columns: 1fr; }
+            .kanban-metrics { flex-direction: column; }
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>🚀 フェーズ２テスト実行レポート</h1>
-            <p>生成時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+            <h1>🚀 フェーズ２テスト実行レポート（改良版）</h1>
+            <p>部品ごとのスケジューリング制御とストア計画管理のテスト結果</p>
+            <p>生成時刻: {timestamp}</p>
+        </div>
+
+        <!-- テスト概要 -->
+        <div class="metric-card">
+            <h3>📋 テスト概要</h3>
+            <div class="summary-stats">
+                <div class="summary-stat">
+                    <div class="summary-stat-value">{test_start_time}</div>
+                    <div class="summary-stat-label">テスト開始時刻</div>
+                </div>
+                <div class="summary-stat">
+                    <div class="summary-stat-value">{test_end_time}</div>
+                    <div class="summary-stat-label">テスト終了時刻</div>
+                </div>
+                <div class="summary-stat">
+                    <div class="summary-stat-value">{total_events}</div>
+                    <div class="summary-stat-label">総イベント数</div>
+                </div>
+                <div class="summary-stat">
+                    <div class="summary-stat-value">{total_states}</div>
+                    <div class="summary-stat-label">状態記録数</div>
+                </div>
+            </div>
         </div>
 
         <!-- リアルタイムメトリクス -->
-        <div class="real-time">
+        <div class="metric-card">
             <h3>📊 リアルタイム状況</h3>
             <div class="status-grid">
 """
@@ -1278,6 +1504,119 @@ class SimulationEngine:
         </div>
 """
         
+        # フェーズ2改良版: スケジューリング制御の詳細分析
+        if log.get('scheduling_control_log'):
+            html_content += """
+        <div class="metric-card">
+            <h3>🎯 スケジューリング制御分析</h3>
+            <div class="scheduling-analysis">
+"""
+            
+            # 制御方式別の統計
+            push_events = len(log['scheduling_control_log'].get('push_control_events', []))
+            pull_events = len(log['scheduling_control_log'].get('pull_control_events', []))
+            kanban_events = len(log['scheduling_control_log'].get('kanban_control_events', []))
+            hybrid_events = len(log['scheduling_control_log'].get('hybrid_control_events', []))
+            
+            html_content += f"""
+                <div class="control-summary">
+                    <h4>📊 制御方式別イベント数</h4>
+                    <div class="control-stats">
+                        <div class="control-stat">
+                            <span class="control-type push">プッシュ型</span>
+                            <span class="control-count">{push_events}</span>
+                        </div>
+                        <div class="control-stat">
+                            <span class="control-type pull">プル型</span>
+                            <span class="control-count">{pull_events}</span>
+                        </div>
+                        <div class="control-stat">
+                            <span class="control-type kanban">かんばん</span>
+                            <span class="control-count">{kanban_events}</span>
+                        </div>
+                        <div class="control-stat">
+                            <span class="control-type hybrid">ハイブリッド</span>
+                            <span class="control-count">{hybrid_events}</span>
+                        </div>
+                    </div>
+                </div>
+"""
+            
+            # 材料フロー分析の最新状況
+            if log['scheduling_control_log'].get('material_flow_analysis'):
+                latest_flow = log['scheduling_control_log']['material_flow_analysis'][-1]
+                html_content += """
+                <div class="material-flow-analysis">
+                    <h4>🔄 材料フロー分析（最新）</h4>
+                    <div class="flow-details">
+"""
+                
+                for material_id, analysis in latest_flow.get('scheduling_analysis', {}).items():
+                    control_status = analysis.get('control_status', 'unknown')
+                    status_class = {
+                        'sufficient': 'success',
+                        'adequate': 'info',
+                        'low': 'warning',
+                        'empty': 'alert'
+                    }.get(control_status, 'unknown')
+                    
+                    html_content += f"""
+                        <div class="material-flow-item {status_class}">
+                            <h5>{material_id}</h5>
+                            <div class="flow-details-grid">
+                                <div class="flow-detail">
+                                    <span class="label">制御方式:</span>
+                                    <span class="value">{analysis.get('scheduling_mode', 'N/A')}</span>
+                                </div>
+                                <div class="flow-detail">
+                                    <span class="label">現在在庫:</span>
+                                    <span class="value">{analysis.get('current_stock', 0)}</span>
+                                </div>
+                                <div class="flow-detail">
+                                    <span class="label">必要数量:</span>
+                                    <span class="value">{analysis.get('required_quantity', 0)}</span>
+                                </div>
+                                <div class="flow-detail">
+                                    <span class="label">制御状況:</span>
+                                    <span class="value status-{control_status}">{control_status}</span>
+                                </div>
+                            </div>
+                        </div>
+"""
+                
+                html_content += """
+                    </div>
+                </div>
+"""
+            
+            # かんばん制御の詳細
+            if log['scheduling_control_log'].get('kanban_control_events'):
+                latest_kanban = log['scheduling_control_log']['kanban_control_events'][-1]
+                html_content += f"""
+                <div class="kanban-analysis">
+                    <h4>🎴 かんばん制御状況（最新）</h4>
+                    <div class="kanban-details">
+                        <div class="kanban-item">
+                            <span class="material-id">{latest_kanban.get('material_id', 'N/A')}</span>
+                            <span class="kanban-type">{latest_kanban.get('kanban_type', 'N/A')}</span>
+                            <span class="kanban-status status-{latest_kanban.get('kanban_status', 'normal')}">
+                                {latest_kanban.get('kanban_status', 'normal')}
+                            </span>
+                            <div class="kanban-metrics">
+                                <span>在庫: {latest_kanban.get('current_stock', 0)}</span>
+                                <span>発注点: {latest_kanban.get('reorder_point', 0)}</span>
+                                <span>最大在庫: {latest_kanban.get('max_inventory', 0)}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+"""
+            
+            html_content += """
+            </div>
+        </div>
+"""
+        
         # チャート表示
         html_content += """
         <!-- チャート表示 -->
@@ -1312,7 +1651,7 @@ class SimulationEngine:
                 <div class="event-item">
                     <div class="event-time">{timestamp}</div>
                     <div class="event-type">{event_type}</div>
-                    <div class="event-desc">{description}</div>
+                    <div class="event-description">{description}</div>
                 </div>
 """
         

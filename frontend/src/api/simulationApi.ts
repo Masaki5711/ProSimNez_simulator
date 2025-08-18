@@ -149,3 +149,80 @@ export const networkApi = {
     return response.data;
   },
 };
+
+// ネットワークシミュレーション用のAPI関数
+export const networkSimulationApi = {
+  // サンプルネットワークデータの取得
+  getSampleData: async () => {
+    const response = await fetch('/api/network-simulation/sample-data');
+    if (!response.ok) {
+      throw new Error('サンプルデータの取得に失敗しました');
+    }
+    return response.json();
+  },
+
+  // ネットワークデータの検証
+  validateNetworkData: async (networkData: any) => {
+    const response = await fetch('/api/network-simulation/validate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ network_data: networkData }),
+    });
+    if (!response.ok) {
+      throw new Error('ネットワークデータの検証に失敗しました');
+    }
+    return response.json();
+  },
+
+  // ネットワークシミュレーションの開始
+  startNetworkSimulation: async (config: {
+    start_time: string;
+    duration: number;
+    network_data: any;
+    enable_scheduling_control: boolean;
+    enable_real_time_update: boolean;
+  }) => {
+    const response = await fetch('/api/start-network-simulation', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(config),
+    });
+    if (!response.ok) {
+      throw new Error('ネットワークシミュレーションの開始に失敗しました');
+    }
+    return response.json();
+  },
+
+  // ネットワークシミュレーションの状態取得
+  getNetworkSimulationStatus: async () => {
+    const response = await fetch('/api/network-simulation/status');
+    if (!response.ok) {
+      throw new Error('シミュレーション状態の取得に失敗しました');
+    }
+    return response.json();
+  },
+
+  // ネットワークシミュレーションの停止
+  stopNetworkSimulation: async () => {
+    const response = await fetch('/api/network-simulation/stop', {
+      method: 'POST',
+    });
+    if (!response.ok) {
+      throw new Error('シミュレーションの停止に失敗しました');
+    }
+    return response.json();
+  },
+
+  // ネットワークシミュレーション結果の取得
+  getNetworkSimulationResults: async () => {
+    const response = await fetch('/api/network-simulation/results');
+    if (!response.ok) {
+      throw new Error('シミュレーション結果の取得に失敗しました');
+    }
+    return response.json();
+  },
+};

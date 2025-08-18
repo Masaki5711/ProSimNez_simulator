@@ -1,0 +1,228 @@
+{
+  "nodes": [
+    {
+      "id": "machining_center_1",
+      "type": "machining",
+      "position": {"x": 100, "y": 100},
+      "data": {
+        "label": "加工センター1",
+        "cycleTime": 45,
+        "setupTime": 120,
+        "equipmentCount": 2,
+        "operatorCount": 1,
+        "inputBufferCapacity": 100,
+        "outputBufferCapacity": 100,
+        "defectRate": 1.5,
+        "reworkRate": 0.8,
+        "operatingCost": 150,
+        "schedulingMode": "push",
+        "batchSize": 25,
+        "minBatchSize": 10,
+        "maxBatchSize": 100
+      }
+    },
+    {
+      "id": "machining_center_2",
+      "type": "machining",
+      "position": {"x": 300, "y": 100},
+      "data": {
+        "label": "加工センター2",
+        "cycleTime": 60,
+        "setupTime": 90,
+        "equipmentCount": 1,
+        "operatorCount": 1,
+        "inputBufferCapacity": 80,
+        "outputBufferCapacity": 80,
+        "defectRate": 2.0,
+        "reworkRate": 1.2,
+        "operatingCost": 120,
+        "schedulingMode": "pull",
+        "batchSize": 20,
+        "minBatchSize": 5,
+        "maxBatchSize": 50,
+        "kanbanEnabled": true,
+        "kanbanCardCount": 4,
+        "reorderPoint": 15,
+        "maxInventory": 60,
+        "supplierLeadTime": 3,
+        "kanbanType": "withdrawal"
+      }
+    },
+    {
+      "id": "assembly_line_1",
+      "type": "assembly",
+      "position": {"x": 200, "y": 250},
+      "data": {
+        "label": "組立ライン1",
+        "cycleTime": 180,
+        "setupTime": 240,
+        "equipmentCount": 1,
+        "operatorCount": 3,
+        "inputBufferCapacity": 60,
+        "outputBufferCapacity": 60,
+        "defectRate": 0.8,
+        "reworkRate": 0.5,
+        "operatingCost": 200,
+        "schedulingMode": "hybrid",
+        "batchSize": 15,
+        "minBatchSize": 5,
+        "maxBatchSize": 30,
+        "kanbanEnabled": true,
+        "kanbanCardCount": 3,
+        "reorderPoint": 8,
+        "maxInventory": 40,
+        "supplierLeadTime": 2,
+        "kanbanType": "production"
+      }
+    },
+    {
+      "id": "quality_check_1",
+      "type": "inspection",
+      "position": {"x": 400, "y": 250},
+      "data": {
+        "label": "品質検査1",
+        "cycleTime": 90,
+        "setupTime": 60,
+        "equipmentCount": 1,
+        "operatorCount": 1,
+        "inputBufferCapacity": 40,
+        "outputBufferCapacity": 40,
+        "defectRate": 0.0,
+        "reworkRate": 0.0,
+        "operatingCost": 80,
+        "schedulingMode": "pull",
+        "batchSize": 10,
+        "minBatchSize": 1,
+        "maxBatchSize": 20
+      }
+    },
+    {
+      "id": "packaging_station",
+      "type": "shipping",
+      "position": {"x": 500, "y": 100},
+      "data": {
+        "label": "包装ステーション",
+        "cycleTime": 30,
+        "setupTime": 45,
+        "equipmentCount": 1,
+        "operatorCount": 1,
+        "inputBufferCapacity": 30,
+        "outputBufferCapacity": 30,
+        "defectRate": 0.0,
+        "reworkRate": 0.0,
+        "operatingCost": 60,
+        "schedulingMode": "push",
+        "batchSize": 5,
+        "minBatchSize": 1,
+        "maxBatchSize": 10
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge_m1_to_a1",
+      "source": "machining_center_1",
+      "target": "assembly_line_1",
+      "data": {
+        "transportTime": 20,
+        "transportLotSize": 25,
+        "transportCost": 8,
+        "distance": 75,
+        "transportType": "conveyor",
+        "maxCapacity": 150
+      }
+    },
+    {
+      "id": "edge_m2_to_a1",
+      "source": "machining_center_2",
+      "target": "assembly_line_1",
+      "data": {
+        "transportTime": 25,
+        "transportLotSize": 20,
+        "transportCost": 10,
+        "distance": 90,
+        "transportType": "agv",
+        "maxCapacity": 100
+      }
+    },
+    {
+      "id": "edge_a1_to_qc1",
+      "source": "assembly_line_1",
+      "target": "quality_check_1",
+      "data": {
+        "transportTime": 15,
+        "transportLotSize": 15,
+        "transportCost": 6,
+        "distance": 60,
+        "transportType": "conveyor",
+        "maxCapacity": 80
+      }
+    },
+    {
+      "id": "edge_qc1_to_pkg",
+      "source": "quality_check_1",
+      "target": "packaging_station",
+      "data": {
+        "transportTime": 10,
+        "transportLotSize": 10,
+        "transportCost": 4,
+        "distance": 40,
+        "transportType": "manual",
+        "maxCapacity": 50
+      }
+    }
+  ],
+  "products": [
+    {
+      "id": "PRODUCT_MACHINED_PART_1",
+      "name": "加工部品1",
+      "type": "component",
+      "processing_time": 45,
+      "source_process": "machining_center_1"
+    },
+    {
+      "id": "PRODUCT_MACHINED_PART_2",
+      "name": "加工部品2",
+      "type": "component",
+      "processing_time": 60,
+      "source_process": "machining_center_2"
+    },
+    {
+      "id": "PRODUCT_ASSEMBLED_UNIT",
+      "name": "組立ユニット",
+      "type": "subassembly",
+      "processing_time": 180,
+      "source_process": "assembly_line_1"
+    },
+    {
+      "id": "PRODUCT_FINAL_PRODUCT",
+      "name": "最終製品",
+      "type": "finished_product",
+      "processing_time": 90,
+      "source_process": "quality_check_1"
+    }
+  ],
+  "bom_items": [
+    {
+      "id": "BOM_1",
+      "parent_product": "PRODUCT_ASSEMBLED_UNIT",
+      "child_product": "PRODUCT_MACHINED_PART_1",
+      "quantity": 2,
+      "source_edge": "edge_m1_to_a1"
+    },
+    {
+      "id": "BOM_2",
+      "parent_product": "PRODUCT_ASSEMBLED_UNIT",
+      "child_product": "PRODUCT_MACHINED_PART_2",
+      "quantity": 1,
+      "source_edge": "edge_m2_to_a1"
+    },
+    {
+      "id": "BOM_3",
+      "parent_product": "PRODUCT_FINAL_PRODUCT",
+      "child_product": "PRODUCT_ASSEMBLED_UNIT",
+      "quantity": 1,
+      "source_edge": "edge_a1_to_qc1"
+    }
+  ]
+}

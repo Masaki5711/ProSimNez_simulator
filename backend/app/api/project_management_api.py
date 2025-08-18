@@ -423,3 +423,4 @@ async def cleanup_project(project_id: str, keep_versions: int = Query(10, ge=1, 
 def get_persistence_manager() -> PersistenceManager:
     """永続化マネージャーを取得"""
     return persistence_manager
+

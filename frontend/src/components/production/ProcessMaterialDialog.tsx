@@ -121,19 +121,19 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
     console.log('🔗 対象エッジ:', filteredEdges);
     
     const precedingProcesses = filteredEdges.map(edge => {
-      const sourceNode = nodes.find(node => node.id === edge.source);
-      const sourceProcessData = processAdvancedData.get(edge.source);
+        const sourceNode = nodes.find(node => node.id === edge.source);
+        const sourceProcessData = processAdvancedData.get(edge.source);
       
       console.log(`📋 エッジ ${edge.source} -> ${edge.target}:`, {
         sourceNode: sourceNode?.data,
         sourceProcessData: sourceProcessData
       });
       
-      return {
-        id: edge.source,
-        name: sourceNode?.data?.label || sourceNode?.data?.name || 'Unknown Process',
-        data: sourceProcessData
-      };
+        return {
+          id: edge.source,
+          name: sourceNode?.data?.label || sourceNode?.data?.name || 'Unknown Process',
+          data: sourceProcessData
+        };
     });
     
     const validProcesses = precedingProcesses.filter(process => process.data);
@@ -181,9 +181,66 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
     return outputProducts;
   }, [getPrecedingProcesses, products, processData?.id, edges]);
 
+  // 先頭ノードかどうかを判定する関数
+  const isHeadNode = useCallback(() => {
+    if (!processData?.id || !edges || edges.length === 0) return false;
+    
+    // このノードをターゲットとするエッジが存在しない場合、先頭ノード
+    const hasIncomingEdges = edges.some(edge => edge.target === processData.id);
+    return !hasIncomingEdges;
+  }, [processData?.id, edges]);
+
+  // 先頭保管ノードかどうかを判定する関数
+  const isHeadStorageNode = useCallback(() => {
+    return isHeadNode() && isStorageProcess;
+  }, [isHeadNode, isStorageProcess]);
+
+  // 先頭保管ノード有効化の状態
+  const [enableHeadStorageNode, setEnableHeadStorageNode] = useState(false);
+
+  // 先頭保管ノード設定変更時の処理
+  const handleHeadStorageNodeToggle = (enabled: boolean) => {
+    setEnableHeadStorageNode(enabled);
+    
+    if (enabled && editingProcess) {
+      console.log('🔍 先頭保管ノード有効化: 既存の投入材料の初期バッファ設定を更新中...');
+      
+      // 既存の投入材料の初期バッファ設定を自動的に有効化
+      const updatedInputMaterials = editingProcess.inputMaterials.map(material => {
+        const updatedMaterial = {
+          ...material,
+          initialBufferSettings: {
+            ...material.initialBufferSettings,
+            enabled: true,
+            bufferType: 'input' as const,
+            initialStock: material.initialBufferSettings?.initialStock || 0,
+            safetyStock: material.initialBufferSettings?.safetyStock || 0,
+            maxCapacity: material.initialBufferSettings?.maxCapacity || 100,
+            location: material.initialBufferSettings?.location || '',
+            notes: material.initialBufferSettings?.notes || ''
+          }
+        };
+        return updatedMaterial;
+      });
+      
+      setEditingProcess({
+        ...editingProcess,
+        inputMaterials: updatedInputMaterials as any
+      });
+      
+      console.log('✅ 投入材料の初期バッファ設定更新完了:', updatedInputMaterials);
+    }
+  };
+
   // 投入材料の候補を取得
   const getInputMaterialCandidates = useCallback(() => {
     if (!processData) return [];
+    
+    // 先頭保管ノードが有効な場合は全製品を候補に
+    if (isHeadStorageNode() && enableHeadStorageNode) {
+      console.log('🔍 先頭保管ノード有効: 全製品を候補に');
+      return products;
+    }
     
     // 前工程の出力製品を最優先
     const precedingOutputs = getPrecedingOutputProducts();
@@ -206,7 +263,7 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
     
     // 前工程の出力製品がない場合は原材料のみ
     return products.filter(p => p.type === 'raw_material');
-  }, [processData, products, isStorageProcess, getPrecedingOutputs, getPrecedingOutputProducts]);
+  }, [processData, products, isStorageProcess, getPrecedingOutputs, getPrecedingOutputProducts, isHeadStorageNode, enableHeadStorageNode]);
 
   useEffect(() => {
     if (processData) {
@@ -215,7 +272,9 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
         processName: processData.label || processData.id,
         nodesCount: nodes.length,
         edgesCount: edges.length,
-        processAdvancedDataSize: processAdvancedData.size
+        processAdvancedDataSize: processAdvancedData.size,
+        isHeadNode: isHeadNode(),
+        isHeadStorageNode: isHeadStorageNode()
       });
       
       setEditingProcess({
@@ -223,6 +282,16 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
         inputMaterials: [...(processData.inputMaterials || [])],
         outputProducts: [...(processData.outputProducts || [])],
       });
+      
+      // 先頭保管ノードの設定を読み込み
+      if (isHeadStorageNode()) {
+        // 既存の設定があれば読み込み、なければデフォルト値
+        const existingSetting = processData.inputMaterials?.some(material => 
+          material.initialBufferSettings?.enabled && material.initialBufferSettings?.bufferType === 'input'
+        );
+        setEnableHeadStorageNode(existingSetting || false);
+        console.log('🔍 先頭保管ノード設定読み込み:', existingSetting);
+      }
       
       // 前工程の情報を即座に確認
       const precedingProcesses = getPrecedingProcesses();
@@ -233,7 +302,7 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
         precedingOutputs: precedingOutputs.length
       });
     }
-  }, [processData, nodes, edges, processAdvancedData, getPrecedingProcesses, getPrecedingOutputProducts]);
+  }, [processData, nodes, edges, processAdvancedData, getPrecedingProcesses, getPrecedingOutputProducts, isHeadNode, isHeadStorageNode]);
 
   // 材料投入追加
   const handleAddMaterial = () => {
@@ -272,15 +341,15 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
         supplierLeadTime: 3,
         kanbanType: 'production'
       },
-      // デフォルトの初期バッファー設定
+      // 先頭保管ノードが有効な場合は初期バッファ設定を有効化
       initialBufferSettings: {
-        enabled: false,
-        initialStock: 0,
-        safetyStock: 0,
-        maxCapacity: 100,
+        enabled: isHeadStorageNode() && enableHeadStorageNode,
+        initialStock: newMaterial.initialBufferSettings?.initialStock || 0,
+        safetyStock: newMaterial.initialBufferSettings?.safetyStock || 0,
+        maxCapacity: newMaterial.initialBufferSettings?.maxCapacity || 100,
         bufferType: 'input',
-        location: '',
-        notes: ''
+        location: newMaterial.initialBufferSettings?.location || '',
+        notes: newMaterial.initialBufferSettings?.notes || ''
       }
     };
 
@@ -298,7 +367,7 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
       isDefective: false,
       qualityGrade: 'A',
       initialBufferSettings: {
-        enabled: false,
+        enabled: isHeadStorageNode() && enableHeadStorageNode,
         initialStock: 0,
         safetyStock: 0,
         maxCapacity: 100,
@@ -340,7 +409,7 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
   const handleEditMaterial = (index: number) => {
     setEditingMaterialIndex(index);
     const material = editingProcess!.inputMaterials[index];
-    setNewMaterial({ 
+    setNewMaterial({
       ...material,
       materialId: material.materialId,
       requiredQuantity: material.requiredQuantity,
@@ -439,8 +508,32 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
   // 保存
   const handleSave = () => {
     if (editingProcess) {
-      onSave(editingProcess);
-      onClose();
+      // 先頭保管ノードの設定を反映
+      let updatedProcess = { ...editingProcess };
+      
+      if (isHeadStorageNode() && enableHeadStorageNode) {
+        console.log('🔍 先頭保管ノード設定を反映中...');
+        
+        // 既存の投入材料の初期バッファ設定を更新
+        updatedProcess.inputMaterials = updatedProcess.inputMaterials.map(material => ({
+          ...material,
+          initialBufferSettings: {
+            ...material.initialBufferSettings,
+            enabled: true, // 先頭保管ノードが有効な場合は強制的に有効化
+            bufferType: 'input' as const,
+            initialStock: material.initialBufferSettings?.initialStock || 0,
+            safetyStock: material.initialBufferSettings?.safetyStock || 0,
+            maxCapacity: material.initialBufferSettings?.maxCapacity || 100,
+            location: material.initialBufferSettings?.location || '',
+            notes: material.initialBufferSettings?.notes || ''
+          }
+        })) as any;
+        
+        console.log('✅ 先頭保管ノード設定反映完了:', updatedProcess.inputMaterials);
+      }
+      
+      onSave(updatedProcess);
+    onClose();
     }
   };
 
@@ -471,13 +564,13 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
           <ProcessIcon />
           <Typography variant="h6">
             工程材料設定: {processData?.label}
-          </Typography>
+            </Typography>
           <Chip 
             label={processData?.type} 
             color="primary"
             size="small"
-          />
-        </Box>
+                />
+              </Box>
       </DialogTitle>
 
       <DialogContent>
@@ -486,11 +579,11 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
           <Grid item xs={12} md={6}>
             <Card>
               <CardContent>
-                <Typography variant="h6" gutterBottom>
+            <Typography variant="h6" gutterBottom>
                   <MaterialIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
                   投入材料・部品
-                </Typography>
-                
+            </Typography>
+            
                 {/* 前工程の出力製品情報を表示 */}
                 {getPrecedingOutputProducts().length > 0 ? (
                   <Alert severity="info" sx={{ mb: 2 }}>
@@ -499,16 +592,16 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                     </Typography>
                     <Box sx={{ mt: 1 }}>
                       {getPrecedingOutputProducts().map((product, index) => (
-                        <Chip
+                            <Chip
                           key={index}
-                          label={`${product.name} (${product.processName})`}
+                              label={`${product.name} (${product.processName})`}
                           size="small"
-                          color="primary"
-                          variant="outlined"
+                              color="primary"
+                              variant="outlined"
                           sx={{ mr: 1, mb: 1 }}
-                        />
-                      ))}
-                    </Box>
+                            />
+                        ))}
+              </Box>
                   </Alert>
                 ) : (
                   <Alert severity="warning" sx={{ mb: 2 }}>
@@ -546,96 +639,150 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                   <AccordionSummary expandIcon={<ExpandMoreIcon />}>
                     <Typography>
                       {editingMaterialIndex !== null ? '材料編集' : '材料追加'}
-                    </Typography>
+                  </Typography>
                   </AccordionSummary>
                   <AccordionDetails>
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                      <FormControl fullWidth>
-                        <InputLabel>材料・部品</InputLabel>
-                        <Select
-                          value={newMaterial.materialId || ''}
-                          onChange={(e) => {
-                            const selectedMaterialId = e.target.value;
-                            const selectedProduct = products.find(p => p.id === selectedMaterialId);
-                            const precedingProduct = getPrecedingOutputProducts().find(p => p.id === selectedMaterialId);
-                            
-                            setNewMaterial({ 
-                              ...newMaterial, 
-                              materialId: selectedMaterialId,
-                              // 前工程の出力製品の場合、関連情報を自動設定
-                              ...(precedingProduct && {
-                                originalProductId: precedingProduct.id,
-                                storageLocation: `前工程: ${precedingProduct.processName}`,
-                                supplyMethod: 'kanban' as any
-                              })
-                            });
-                          }}
-                        >
-                          {/* 前工程の出力製品を最優先表示 */}
-                          {getPrecedingOutputProducts().length > 0 ? (
-                            <>
-                              <Box>
-                                <Typography variant="caption" color="primary" sx={{ px: 2, py: 1, display: 'block' }}>
-                                  🔗 前工程の出力製品（推奨）
-                                </Typography>
-                                {getPrecedingOutputProducts().map((product) => (
-                                  <MenuItem key={`preceding_${product.id}`} value={product.id}>
-                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                      <MaterialIcon />
-                                      <Typography>{product.name}</Typography>
-                                      <Chip 
-                                        label={`前工程: ${product.processName}`}
-                                        size="small" 
-                                        color="primary"
-                                        variant="outlined"
-                                      />
-                                      <Chip 
-                                        label={product.type} 
-                                        size="small" 
-                                        color="default"
-                                      />
-                                    </Box>
-                                  </MenuItem>
-                                ))}
+            <Typography variant="h6" gutterBottom>
+                  📥 投入材料設定
+            </Typography>
+            
+                {/* 先頭保管ノード設定 */}
+                {isHeadStorageNode() && (
+                  <Alert severity="info" sx={{ mb: 2 }}>
+                    <Typography variant="body2" gutterBottom>
+                      🔍 先頭保管ノードが検出されました
+                    </Typography>
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={enableHeadStorageNode}
+                          onChange={(e) => handleHeadStorageNodeToggle(e.target.checked)}
+                          color="primary"
+                        />
+                      }
+                      label="先頭保管ノードを有効化（投入部品を自由選択可能）"
+                    />
+                    <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 1 }}>
+                      {enableHeadStorageNode 
+                        ? 'ON: 全製品から投入部品を選択できます。初期バッファ設定が自動的に有効化されます。'
+                        : 'OFF: 前工程からの接続がない場合、投入部品は設定できません。'
+                      }
+                    </Typography>
+                  </Alert>
+                )}
+
+                <FormControl fullWidth sx={{ mb: 2 }}>
+                  <InputLabel>投入材料・部品</InputLabel>
+                  <Select
+                    value={newMaterial.materialId || ''}
+                    onChange={(e) => {
+                      const selectedProduct = products.find(p => p.id === e.target.value);
+                      const precedingProduct = getPrecedingOutputProducts().find(p => p.id === e.target.value);
+                      
+                      setNewMaterial({
+                        ...newMaterial,
+                        materialId: e.target.value,
+                        materialName: selectedProduct?.name || '',
+                        // 前工程の出力製品の場合、関連情報を自動設定
+                        ...(precedingProduct && {
+                          originalProductId: precedingProduct.id,
+                          storageLocation: `前工程: ${precedingProduct.processName}`,
+                          supplyMethod: 'kanban' as any
+                        })
+                      });
+                    }}
+                  >
+                    {/* 先頭保管ノードが有効な場合は全製品を表示 */}
+                    {isHeadStorageNode() && enableHeadStorageNode ? (
+                      <>
+                        <Box>
+                          <Typography variant="caption" color="success.main" sx={{ px: 2, py: 1, display: 'block' }}>
+                            🎯 先頭保管ノード有効: 全製品から選択可能
+                      </Typography>
+                          {products.map((product) => (
+                            <MenuItem key={product.id} value={product.id}>
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                <MaterialIcon />
+                                <Typography>{product.name}</Typography>
+                            <Chip
+                                  label={product.type} 
+                              size="small"
+                                  color="default"
+                            />
                               </Box>
-                              
-                              {/* 原材料（前工程の出力製品がある場合） */}
-                              {products.filter(p => p.type === 'raw_material').length > 0 && (
-                                <>
-                                  <Box sx={{ borderTop: 1, borderColor: 'divider', my: 1 }} />
-                                  <Box>
-                                    <Typography variant="caption" color="text.secondary" sx={{ px: 2, py: 1, display: 'block' }}>
-                                      🌱 原材料（補助的）
-                                    </Typography>
-                                    {products
-                                      .filter(p => p.type === 'raw_material')
-                                      .map((product) => (
+                            </MenuItem>
+                        ))}
+                    </Box>
+                      </>
+                    ) : (
+                      /* 通常の材料選択ロジック */
+                      <>
+                        {/* 前工程の出力製品を最優先表示 */}
+                        {getPrecedingOutputProducts().length > 0 ? (
+                          <>
+                            <Box>
+                              <Typography variant="caption" color="primary" sx={{ px: 2, py: 1, display: 'block' }}>
+                                🔗 前工程の出力製品（推奨）
+                  </Typography>
+                              {getPrecedingOutputProducts().map((product) => (
+                                <MenuItem key={`preceding_${product.id}`} value={product.id}>
+                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                    <MaterialIcon />
+                                    <Typography>{product.name}</Typography>
+                        <Chip
+                                      label={`前工程: ${product.processName}`}
+                                      size="small" 
+                                      color="primary"
+                          variant="outlined"
+                                    />
+                                    <Chip 
+                                      label={product.type} 
+                          size="small"
+                                      color="default"
+                        />
+                                  </Box>
+                                </MenuItem>
+                    ))}
+          </Box>
+
+                            {/* 原材料（前工程の出力製品がある場合） */}
+                            {products.filter(p => p.type === 'raw_material').length > 0 && (
+                              <>
+                                <Box sx={{ borderTop: 1, borderColor: 'divider', my: 1 }} />
+                                <Box>
+                                  <Typography variant="caption" color="text.secondary" sx={{ px: 2, py: 1, display: 'block' }}>
+                                    🌱 原材料（補助的）
+                                  </Typography>
+                                  {products
+                                    .filter(p => p.type === 'raw_material')
+                                    .map((product) => (
                                       <MenuItem key={product.id} value={product.id}>
                                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                                           <MaterialIcon />
                                           <Typography>{product.name}</Typography>
                                           <Chip 
                                             label={product.type} 
-                                            size="small" 
+                            size="small"
                                             color="default"
                                           />
                                         </Box>
                                       </MenuItem>
                                     ))}
-                                  </Box>
-                                </>
-                              )}
-                            </>
-                          ) : (
-                            /* 前工程の出力製品がない場合は原材料のみ */
-                            <Box>
-                              <Typography variant="caption" color="text.secondary" sx={{ px: 2, py: 1, display: 'block' }}>
-                                🌱 原材料
-                              </Typography>
-                              {products
-                                .filter(p => p.type === 'raw_material')
-                                .map((product) => (
-                                <MenuItem key={product.id} value={product.id}>
+                                </Box>
+                              </>
+                            )}
+                          </>
+                        ) : (
+                          /* 前工程の出力製品がない場合は原材料のみ */
+                          <Box>
+                            <Typography variant="caption" color="text.secondary" sx={{ px: 2, py: 1, display: 'block' }}>
+                              🌱 原材料
+            </Typography>
+                            {products
+                              .filter(p => p.type === 'raw_material')
+                              .map((product) => (
+                      <MenuItem key={product.id} value={product.id}>
                                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                                     <MaterialIcon />
                                     <Typography>{product.name}</Typography>
@@ -645,58 +792,60 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                                       color="default"
                                     />
                                   </Box>
-                                </MenuItem>
-                              ))}
-                            </Box>
-                          )}
-                        </Select>
-                      </FormControl>
+                      </MenuItem>
+                    ))}
+                          </Box>
+                        )}
+                      </>
+                    )}
+                  </Select>
+                </FormControl>
 
                       <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
-                        <TextField
-                          label="必要数量"
-                          type="number"
-                          value={newMaterial.requiredQuantity || ''}
-                          onChange={(e) => setNewMaterial({ ...newMaterial, requiredQuantity: Number(e.target.value) })}
-                          inputProps={{ min: 0, step: 0.1 }}
-                        />
-                        <TextField
-                          label="単位"
-                          value={newMaterial.unit || ''}
-                          onChange={(e) => setNewMaterial({ ...newMaterial, unit: e.target.value })}
-                        />
+                <TextField
+                  label="必要数量"
+                  type="number"
+                  value={newMaterial.requiredQuantity || ''}
+                  onChange={(e) => setNewMaterial({ ...newMaterial, requiredQuantity: Number(e.target.value) })}
+                  inputProps={{ min: 0, step: 0.1 }}
+                />
+                <TextField
+                  label="単位"
+                  value={newMaterial.unit || ''}
+                  onChange={(e) => setNewMaterial({ ...newMaterial, unit: e.target.value })}
+                />
                       </Box>
 
                       <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
-                        <FormControl fullWidth>
-                          <InputLabel>投入タイミング</InputLabel>
-                          <Select
+                <FormControl fullWidth>
+                  <InputLabel>投入タイミング</InputLabel>
+                  <Select
                             value={newMaterial.timing || 'start'}
                             onChange={(e) => setNewMaterial({ ...newMaterial, timing: e.target.value as any })}
-                          >
-                            <MenuItem value="start">工程開始時</MenuItem>
+                  >
+                    <MenuItem value="start">工程開始時</MenuItem>
                             <MenuItem value="middle">工程中間</MenuItem>
-                            <MenuItem value="end">工程終了時</MenuItem>
-                          </Select>
-                        </FormControl>
+                    <MenuItem value="end">工程終了時</MenuItem>
+                  </Select>
+                </FormControl>
 
-                        <FormControl fullWidth>
-                          <InputLabel>供給方法</InputLabel>
-                          <Select
+                <FormControl fullWidth>
+                  <InputLabel>供給方法</InputLabel>
+                  <Select
                             value={newMaterial.supplyMethod || 'manual'}
                             onChange={(e) => setNewMaterial({ ...newMaterial, supplyMethod: e.target.value as any })}
-                          >
-                            <MenuItem value="manual">手動供給</MenuItem>
-                            <MenuItem value="automated">自動供給</MenuItem>
-                            <MenuItem value="kanban">かんばん</MenuItem>
-                          </Select>
-                        </FormControl>
+                  >
+                    <MenuItem value="manual">手動供給</MenuItem>
+                    <MenuItem value="automated">自動供給</MenuItem>
+                    <MenuItem value="kanban">かんばん</MenuItem>
+                  </Select>
+                </FormControl>
                       </Box>
 
-                      <TextField
-                        label="保管場所"
-                        value={newMaterial.storageLocation || ''}
-                        onChange={(e) => setNewMaterial({ ...newMaterial, storageLocation: e.target.value })}
+                <TextField
+                  label="保管場所"
+                  value={newMaterial.storageLocation || ''}
+                  onChange={(e) => setNewMaterial({ ...newMaterial, storageLocation: e.target.value })}
                         fullWidth
                       />
 
@@ -971,18 +1120,18 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                       )}
 
                       <Box sx={{ display: 'flex', gap: 1 }}>
-                        {editingMaterialIndex !== null ? (
-                          <>
-                            <Button
-                              startIcon={<SaveIcon />}
+              {editingMaterialIndex !== null ? (
+                <>
+                  <Button
+                    startIcon={<SaveIcon />}
                               variant="contained"
-                              onClick={handleUpdateMaterial}
-                              disabled={!newMaterial.materialId}
-                            >
-                              更新
-                            </Button>
-                            <Button
-                              startIcon={<CancelIcon />}
+                    onClick={handleUpdateMaterial}
+                    disabled={!newMaterial.materialId}
+                  >
+                    更新
+                  </Button>
+                  <Button
+                    startIcon={<CancelIcon />}
                               onClick={() => {
                                 setEditingMaterialIndex(null);
                                 setNewMaterial({
@@ -993,21 +1142,21 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                                   storageLocation: '',
                                 });
                               }}
-                            >
-                              キャンセル
-                            </Button>
-                          </>
-                        ) : (
-                          <Button
-                            startIcon={<AddIcon />}
+                  >
+                    キャンセル
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  startIcon={<AddIcon />}
                             variant="contained"
-                            onClick={handleAddMaterial}
-                            disabled={!newMaterial.materialId}
-                          >
+                  onClick={handleAddMaterial}
+                  disabled={!newMaterial.materialId}
+                >
                             追加
-                          </Button>
-                        )}
-                      </Box>
+                </Button>
+              )}
+            </Box>
                     </Box>
                   </AccordionDetails>
                 </Accordion>
@@ -1016,7 +1165,7 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                 <Box sx={{ mt: 2 }}>
                   <Typography variant="subtitle1" gutterBottom>
                     投入材料一覧 ({editingProcess?.inputMaterials.length || 0}項目)
-                  </Typography>
+            </Typography>
                   <TableContainer component={Paper} sx={{ maxHeight: 300 }}>
                     <Table size="small">
                       <TableHead>
@@ -1046,9 +1195,9 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                               <TableCell>
                                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                                   <MaterialIcon fontSize="small" />
-                                  <Typography variant="body2">
+                <Typography variant="body2">
                                     {material.materialName}
-                                  </Typography>
+                </Typography>
                                 </Box>
                               </TableCell>
                               <TableCell align="right">
@@ -1061,7 +1210,7 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                                     {material.timing === 'start' && '開始時'}
                                     {material.timing === 'middle' && '中間'}
                                     {material.timing === 'end' && '終了時'}
-                                  </Typography>
+              </Typography>
                                 </Box>
                               </TableCell>
                               <TableCell>
@@ -1077,16 +1226,16 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                               <TableCell>
                                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
                                   {material.isDefective ? (
-                                    <Chip 
+                    <Chip
                                       label="不良品" 
                                       size="small" 
                                       color="error" 
-                                      variant="outlined"
+                      variant="outlined"
                                     />
                                   ) : (
                                     <Chip 
                                       label={`${material.qualityGrade || 'A'}級`} 
-                                      size="small" 
+                      size="small"
                                       color="success" 
                                       variant="outlined"
                                     />
@@ -1096,7 +1245,7 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                                       元製品: {material.originalProductId}
                                     </Typography>
                                   )}
-                                </Box>
+            </Box>
                               </TableCell>
                               <TableCell>
                                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
@@ -1116,9 +1265,9 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                                       variant="outlined"
                                     />
                                   )}
-                                </Box>
+          </Box>
                               </TableCell>
-                              <TableCell>
+                        <TableCell>
                                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
                                   {material.initialBufferSettings?.enabled ? (
                                     <>
@@ -1150,29 +1299,29 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                               </TableCell>
                               <TableCell align="center">
                                 <Tooltip title="編集">
-                                  <IconButton
-                                    size="small"
+                          <IconButton
+                            size="small"
                                     onClick={() => handleEditMaterial(index)}
-                                  >
+                          >
                                     <EditIcon fontSize="small" />
-                                  </IconButton>
+                          </IconButton>
                                 </Tooltip>
                                 <Tooltip title="削除">
-                                  <IconButton
-                                    size="small"
+                          <IconButton
+                            size="small"
                                     onClick={() => handleDeleteMaterial(index)}
                                     color="error"
-                                  >
+                          >
                                     <DeleteIcon fontSize="small" />
-                                  </IconButton>
+                          </IconButton>
                                 </Tooltip>
-                              </TableCell>
-                            </TableRow>
+                        </TableCell>
+                      </TableRow>
                           ))
                         )}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
+                  </TableBody>
+                </Table>
+              </TableContainer>
                 </Box>
               </CardContent>
             </Card>
@@ -1182,10 +1331,10 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
           <Grid item xs={12} md={6}>
             <Card>
               <CardContent>
-                <Typography variant="h6" gutterBottom>
+            <Typography variant="h6" gutterBottom>
                   <ProcessIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
                   出力製品
-                </Typography>
+            </Typography>
 
                 {/* 出力製品追加フォーム */}
                 <Accordion>
@@ -1194,62 +1343,62 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                   </AccordionSummary>
                   <AccordionDetails>
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                      <FormControl fullWidth>
-                        <InputLabel>出力製品</InputLabel>
-                        <Select
+                <FormControl fullWidth>
+                  <InputLabel>出力製品</InputLabel>
+                  <Select
                           value={newOutput.productId || ''}
                           onChange={(e) => setNewOutput({ ...newOutput, productId: e.target.value })}
-                        >
+                  >
                           {products.map((product) => (
-                            <MenuItem key={product.id} value={product.id}>
+                      <MenuItem key={product.id} value={product.id}>
                               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                                 <ProcessIcon />
                                 <Typography>{product.name}</Typography>
                                 <Chip label={product.type} size="small" />
                               </Box>
-                            </MenuItem>
-                          ))}
-                        </Select>
-                      </FormControl>
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
 
                       <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 2 }}>
-                        <TextField
-                          label="出力数量"
-                          type="number"
+                <TextField
+                  label="出力数量"
+                  type="number"
                           value={newOutput.outputQuantity || ''}
                           onChange={(e) => setNewOutput({ ...newOutput, outputQuantity: Number(e.target.value) })}
-                          inputProps={{ min: 0, step: 0.1 }}
-                        />
-                        <TextField
-                          label="単位"
+                  inputProps={{ min: 0, step: 0.1 }}
+                />
+                <TextField
+                  label="単位"
                           value={newOutput.unit || ''}
                           onChange={(e) => setNewOutput({ ...newOutput, unit: e.target.value })}
-                        />
-                        <TextField
-                          label="品質レベル"
+                />
+                <TextField
+                  label="品質レベル"
                           value={newOutput.qualityLevel || ''}
                           onChange={(e) => setNewOutput({ ...newOutput, qualityLevel: e.target.value })}
-                        />
+                />
                       </Box>
                       
-                      <TextField
-                        label="段取り時間（分）"
-                        type="number"
+                <TextField
+                  label="段取り時間（分）"
+                  type="number"
                         value={newOutput.setupTime || ''}
                         onChange={(e) => setNewOutput({ ...newOutput, setupTime: Number(e.target.value) })}
-                        inputProps={{ min: 0, step: 1 }}
+                  inputProps={{ min: 0, step: 1 }}
                         helperText="この製品を製造する際の段取り時間を設定してください"
                         fullWidth
                       />
 
-                      <Button
+                  <Button
                         startIcon={<AddIcon />}
-                        variant="contained"
+                    variant="contained"
                         onClick={handleAddOutput}
                         disabled={!newOutput.productId}
                       >
                         追加
-                      </Button>
+                  </Button>
                     </Box>
                   </AccordionDetails>
                 </Accordion>
@@ -1321,7 +1470,7 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                       </TableBody>
                     </Table>
                   </TableContainer>
-                </Box>
+            </Box>
               </CardContent>
             </Card>
           </Grid>
