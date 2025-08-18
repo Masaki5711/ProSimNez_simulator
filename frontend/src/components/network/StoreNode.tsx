@@ -54,19 +54,24 @@ const StoreNode: React.FC<NodeProps<StoreNodeData>> = ({ data, selected, id }) =
     icon: 'Store'
   });
 
+  // 統計情報の表示有無に基づいてノードの高さを動的に調整
+  const hasStats = scheduleCount > 0 || inventoryCount > 0;
+  const nodeHeight = hasStats ? 100 : 80;
+
   return (
     <Box
       sx={{
         position: 'relative',
         width: 120,
-        height: 80,
+        height: nodeHeight,
         backgroundColor: selected ? '#e3f2fd' : '#ffffff',
         border: `2px solid ${selected ? '#2196f3' : getStoreTypeColor(data.storeType)}`,
         borderRadius: 2,
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        justifyContent: 'center',
+        justifyContent: 'flex-start',
+        paddingTop: 1,
         cursor: 'pointer',
         transition: 'all 0.2s ease',
         '&:hover': {
@@ -104,6 +109,7 @@ const StoreNode: React.FC<NodeProps<StoreNodeData>> = ({ data, selected, id }) =
           backgroundColor: getStoreTypeColor(data.storeType),
           color: 'white',
           mb: 0.5,
+          zIndex: 1,
         }}
       />
 
@@ -119,28 +125,37 @@ const StoreNode: React.FC<NodeProps<StoreNodeData>> = ({ data, selected, id }) =
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
+          mb: hasStats ? 0.5 : 0,
         }}
       >
         {data.label}
       </Typography>
 
       {/* 統計情報 */}
-      <Box sx={{ display: 'flex', gap: 0.5, mt: 0.5 }}>
-        {scheduleCount > 0 && (
-          <Chip
-            label={`計画: ${scheduleCount}`}
-            size="small"
-            sx={{ height: 16, fontSize: '0.6rem', backgroundColor: '#4caf50', color: 'white' }}
-          />
-        )}
-        {inventoryCount > 0 && (
-          <Chip
-            label={`在庫: ${inventoryCount}`}
-            size="small"
-            sx={{ height: 16, fontSize: '0.6rem', backgroundColor: '#ff9800', color: 'white' }}
-          />
-        )}
-      </Box>
+      {hasStats && (
+        <Box sx={{ 
+          display: 'flex', 
+          gap: 0.5, 
+          mt: 'auto',
+          mb: 0.5,
+          justifyContent: 'center'
+        }}>
+          {scheduleCount > 0 && (
+            <Chip
+              label={`計画: ${scheduleCount}`}
+              size="small"
+              sx={{ height: 16, fontSize: '0.6rem', backgroundColor: '#4caf50', color: 'white' }}
+            />
+          )}
+          {inventoryCount > 0 && (
+            <Chip
+              label={`在庫: ${inventoryCount}`}
+              size="small"
+              sx={{ height: 16, fontSize: '0.6rem', backgroundColor: '#ff9800', color: 'white' }}
+            />
+          )}
+        </Box>
+      )}
 
       {/* 設定ボタン */}
       {isHovered && (

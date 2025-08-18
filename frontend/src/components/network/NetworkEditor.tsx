@@ -1251,7 +1251,7 @@ const NetworkEditor = () => {
       // 新しいノードの作成
       const newNode = {
         id: `node_${Date.now()}`,
-        type: 'process',
+        type: type === 'store' ? 'store' : 'process',
         position,
         data: createDefaultNodeData(type),
       };
