@@ -465,3 +465,5 @@ async def run_quick_demo():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"デモテストエラー: {str(e)}")
 
+
+

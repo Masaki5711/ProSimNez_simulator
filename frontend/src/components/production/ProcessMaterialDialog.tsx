@@ -82,8 +82,8 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
   const [newMaterial, setNewMaterial] = useState<Partial<MaterialInput>>({
     requiredQuantity: 1,
     unit: '個',
-    timing: 'start',
-    supplyMethod: 'manual',
+    timing: 'start' as const,
+    supplyMethod: 'manual' as const,
     storageLocation: '',
     isDefective: false,
     qualityGrade: 'A',
@@ -92,11 +92,13 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
       initialStock: 0,
       safetyStock: 0,
       maxCapacity: 100,
-      bufferType: 'input',
+      bufferType: 'input' as const,
       location: '',
       notes: ''
     }
   });
+
+  console.log('🔍 newMaterial 初期化:', newMaterial);
   const [newOutput, setNewOutput] = useState<Partial<ProductOutput>>({
     outputQuantity: 1,
     unit: '個',
@@ -191,18 +193,55 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
   }, [processData?.id, edges]);
 
   // 先頭保管ノードかどうかを判定する関数
-  const isHeadStorageNode = useCallback(() => {
+  const isHeadStorageNode = useCallback((): boolean => {
+    // 先頭ノード（前工程がない）かつ、保管プロセスとして認識されている場合
     return isHeadNode() && isStorageProcess;
   }, [isHeadNode, isStorageProcess]);
+
+  // 先頭保管ノードの判定を修正（isStorageProcessに依存しない）
+  const isActualHeadStorageNode = useCallback((): boolean => {
+    // 先頭ノード（前工程がない）の場合のみ
+    return isHeadNode();
+  }, [isHeadNode]);
 
   // 先頭保管ノード有効化の状態
   const [enableHeadStorageNode, setEnableHeadStorageNode] = useState(false);
 
+  // Selectコンポーネントの開閉状態を制御
+  const [selectOpen, setSelectOpen] = useState(false);
+
+  // 先頭保管ノードの自動有効化を無効化（トグルが正しく動作するように）
+  // useEffect(() => {
+  //   if (isHeadStorageNode() && !enableHeadStorageNode) {
+  //     console.log('🔍 先頭保管ノードを自動的に有効化します');
+  //     setEnableHeadStorageNode(true);
+  //   }
+  // }, [isHeadStorageNode, enableHeadStorageNode]);
+
   // 先頭保管ノード設定変更時の処理
   const handleHeadStorageNodeToggle = (enabled: boolean) => {
+    console.log('🔍 先頭保管ノード設定変更:', {
+      enabled,
+      currentState: enableHeadStorageNode,
+      isHeadStorageNode: isHeadStorageNode(),
+      isActualHeadStorageNode: isActualHeadStorageNode(),
+      processData: processData?.id,
+      timestamp: new Date().toISOString()
+    });
+    
+    // 状態を確実に更新
     setEnableHeadStorageNode(enabled);
     
-    if (enabled && editingProcess) {
+    // 状態更新後の確認
+    setTimeout(() => {
+      console.log('🔍 先頭保管ノード設定更新後確認:', {
+        requestedState: enabled,
+        actualState: enableHeadStorageNode,
+        timestamp: new Date().toISOString()
+      });
+    }, 0);
+    
+    if (enabled && editingProcess && isActualHeadStorageNode()) {
       console.log('🔍 先頭保管ノード有効化: 既存の投入材料の初期バッファ設定を更新中...');
       
       // 既存の投入材料の初期バッファ設定を自動的に有効化
@@ -236,34 +275,24 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
   const getInputMaterialCandidates = useCallback(() => {
     if (!processData) return [];
     
+    console.log('🔍 投入材料候補取得:', {
+      isHeadStorageNode: isHeadStorageNode(),
+      isActualHeadStorageNode: isActualHeadStorageNode(),
+      enableHeadStorageNode: enableHeadStorageNode,
+      isStorageProcess: isStorageProcess,
+      productsCount: products.length
+    });
+    
     // 先頭保管ノードが有効な場合は全製品を候補に
-    if (isHeadStorageNode() && enableHeadStorageNode) {
+    if (isActualHeadStorageNode() && enableHeadStorageNode) {
       console.log('🔍 先頭保管ノード有効: 全製品を候補に');
       return products;
     }
     
-    // 前工程の出力製品を最優先
-    const precedingOutputs = getPrecedingOutputProducts();
-    if (precedingOutputs.length > 0) {
-      return precedingOutputs;
-    }
-    
-    if (isStorageProcess) {
-      // ストア工程の場合は前工程の出力製品がない場合のみ全製品を候補に
-      return products;
-    }
-    
-    if (getPrecedingOutputs) {
-      // 前工程の出力製品を候補に
-      const precedingOutputs = getPrecedingOutputs(processData.id);
-      if (precedingOutputs.length > 0) {
-        return precedingOutputs;
-      }
-    }
-    
-    // 前工程の出力製品がない場合は原材料のみ
-    return products.filter(p => p.type === 'raw_material');
-  }, [processData, products, isStorageProcess, getPrecedingOutputs, getPrecedingOutputProducts, isHeadStorageNode, enableHeadStorageNode]);
+    // 先頭保管ノードが無効な場合は前工程の出力製品のみ
+    console.log('🔍 先頭保管ノード無効: 前工程の出力製品のみ');
+    return getPrecedingOutputProducts();
+  }, [processData, isHeadStorageNode, isActualHeadStorageNode, enableHeadStorageNode, isStorageProcess, products, getPrecedingOutputProducts]);
 
   useEffect(() => {
     if (processData) {
@@ -283,16 +312,6 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
         outputProducts: [...(processData.outputProducts || [])],
       });
       
-      // 先頭保管ノードの設定を読み込み
-      if (isHeadStorageNode()) {
-        // 既存の設定があれば読み込み、なければデフォルト値
-        const existingSetting = processData.inputMaterials?.some(material => 
-          material.initialBufferSettings?.enabled && material.initialBufferSettings?.bufferType === 'input'
-        );
-        setEnableHeadStorageNode(existingSetting || false);
-        console.log('🔍 先頭保管ノード設定読み込み:', existingSetting);
-      }
-      
       // 前工程の情報を即座に確認
       const precedingProcesses = getPrecedingProcesses();
       const precedingOutputs = getPrecedingOutputProducts();
@@ -302,11 +321,75 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
         precedingOutputs: precedingOutputs.length
       });
     }
-  }, [processData, nodes, edges, processAdvancedData, getPrecedingProcesses, getPrecedingOutputProducts, isHeadNode, isHeadStorageNode]);
+  }, [processData, nodes, edges, processAdvancedData, getPrecedingProcesses, getPrecedingOutputProducts, isHeadNode, isHeadStorageNode, isActualHeadStorageNode]);
+
+  // 先頭保管ノードの設定読み込み（processData変更時のみ）
+  useEffect(() => {
+    if (processData && isActualHeadStorageNode()) {
+      // 既存の設定があれば読み込み、なければデフォルト値（false）
+      // ただし、既に設定されている場合は上書きしない
+      if (enableHeadStorageNode === false) {
+        const existingSetting = processData.inputMaterials?.some(material => 
+          material.initialBufferSettings?.enabled && material.initialBufferSettings?.bufferType === 'input'
+        );
+        setEnableHeadStorageNode(existingSetting || false);
+        console.log('🔍 先頭保管ノード設定読み込み:', {
+          existingSetting,
+          processDataId: processData.id,
+          isActualHeadStorageNode: isActualHeadStorageNode(),
+          currentEnableHeadStorageNode: enableHeadStorageNode,
+          timestamp: new Date().toISOString()
+        });
+      } else {
+        console.log('🔍 先頭保管ノード設定読み込みスキップ:', {
+          reason: '既に設定済み',
+          currentEnableHeadStorageNode: enableHeadStorageNode,
+          processDataId: processData.id,
+          timestamp: new Date().toISOString()
+        });
+      }
+    }
+  }, [processData, isActualHeadStorageNode]); // enableHeadStorageNodeを依存配列から削除
+
+  // デバッグ用: newMaterialの状態変化を監視
+  useEffect(() => {
+    console.log('🔍 newMaterial 状態変化:', {
+      materialId: newMaterial.materialId,
+      materialName: newMaterial.materialName,
+      requiredQuantity: newMaterial.requiredQuantity,
+      unit: newMaterial.unit,
+      timing: newMaterial.timing,
+      supplyMethod: newMaterial.supplyMethod,
+      storageLocation: newMaterial.storageLocation,
+      isDefective: newMaterial.isDefective,
+      qualityGrade: newMaterial.qualityGrade,
+      timestamp: new Date().toISOString(),
+      stack: new Error().stack?.split('\n').slice(1, 4).join('\n'),
+      fullObject: JSON.stringify(newMaterial, null, 2)
+    });
+  }, [newMaterial]);
+
+  // デバッグ用: newOutputの状態変化を監視
+  useEffect(() => {
+    console.log('🔍 newOutput 状態変化:', newOutput);
+  }, [newOutput]);
 
   // 材料投入追加
   const handleAddMaterial = () => {
-    if (!newMaterial.materialId || !editingProcess) return;
+    console.log('🔍 handleAddMaterial 呼び出し:', {
+      newMaterial,
+      editingProcess: editingProcess?.id,
+      materialId: newMaterial.materialId,
+      materialName: newMaterial.materialName
+    });
+    
+    if (!newMaterial.materialId || !editingProcess) {
+      console.warn('⚠️ 材料追加失敗: 必要なデータが不足', {
+        materialId: newMaterial.materialId,
+        editingProcess: !!editingProcess
+      });
+      return;
+    }
 
     const material: MaterialInput = {
       materialId: newMaterial.materialId!,
@@ -353,16 +436,18 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
       }
     };
 
+    console.log('🔍 作成された材料オブジェクト:', material);
+
     setEditingProcess({
       ...editingProcess,
       inputMaterials: [...editingProcess.inputMaterials, material],
     });
 
-    setNewMaterial({
+    const resetMaterial = {
       requiredQuantity: 1,
       unit: '個',
-      timing: 'start',
-      supplyMethod: 'manual',
+      timing: 'start' as const,
+      supplyMethod: 'manual' as const,
       storageLocation: '',
       isDefective: false,
       qualityGrade: 'A',
@@ -371,16 +456,33 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
         initialStock: 0,
         safetyStock: 0,
         maxCapacity: 100,
-        bufferType: 'input',
+        bufferType: 'input' as const,
         location: '',
         notes: ''
       }
-    });
+    };
+
+    console.log('🔍 材料追加後のリセットデータ:', resetMaterial);
+    setNewMaterial(resetMaterial);
+    
+    console.log('✅ 材料追加完了');
   };
 
   // 出力製品追加
   const handleAddOutput = () => {
-    if (!newOutput.productId || !editingProcess) return;
+    console.log('🔍 handleAddOutput 呼び出し:', {
+      newOutput,
+      editingProcess: editingProcess?.id,
+      productId: newOutput.productId
+    });
+    
+    if (!newOutput.productId || !editingProcess) {
+      console.warn('⚠️ 出力製品追加失敗: 必要なデータが不足', {
+        productId: newOutput.productId,
+        editingProcess: !!editingProcess
+      });
+      return;
+    }
 
     const output: ProductOutput = {
       productId: newOutput.productId!,
@@ -392,17 +494,24 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
       packagingSpec: newOutput.packagingSpec,
     };
 
+    console.log('🔍 作成された出力製品オブジェクト:', output);
+
     setEditingProcess({
       ...editingProcess,
       outputProducts: [...editingProcess.outputProducts, output],
     });
 
-    setNewOutput({
+    const resetOutput = {
       outputQuantity: 1,
       unit: '個',
       qualityLevel: 'standard',
       setupTime: 0,
-    });
+    };
+
+    console.log('🔍 出力製品追加後のリセットデータ:', resetOutput);
+    setNewOutput(resetOutput);
+    
+    console.log('✅ 出力製品追加完了');
   };
 
   // 材料編集
@@ -462,13 +571,13 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
     setNewMaterial({
       requiredQuantity: 1,
       unit: '個',
-      timing: 'start',
-      supplyMethod: 'manual',
+      timing: 'start' as const,
+      supplyMethod: 'manual' as const,
       storageLocation: '',
       isDefective: false,
       qualityGrade: 'A',
       // デフォルトのスケジューリング設定
-      schedulingMode: 'push',
+      schedulingMode: 'push' as const,
       batchSize: 1,
       minBatchSize: 1,
       maxBatchSize: 100,
@@ -478,7 +587,7 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
         reorderPoint: 10,
         maxInventory: 50,
         supplierLeadTime: 3,
-        kanbanType: 'production'
+        kanbanType: 'production' as const
       }
     });
   };
@@ -648,16 +757,32 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
             </Typography>
             
                 {/* 先頭保管ノード設定 */}
-                {isHeadStorageNode() && (
+                {isActualHeadStorageNode() && (
                   <Alert severity="info" sx={{ mb: 2 }}>
                     <Typography variant="body2" gutterBottom>
                       🔍 先頭保管ノードが検出されました
                     </Typography>
+                    {(() => {
+                      console.log('🔍 先頭保管ノードトグルUI レンダリング:', {
+                        isHeadStorageNode: isHeadStorageNode(),
+                        isActualHeadStorageNode: isActualHeadStorageNode(),
+                        enableHeadStorageNode: enableHeadStorageNode,
+                        timestamp: new Date().toISOString()
+                      });
+                      return null;
+                    })()}
                     <FormControlLabel
                       control={
                         <Switch
                           checked={enableHeadStorageNode}
-                          onChange={(e) => handleHeadStorageNodeToggle(e.target.checked)}
+                          onChange={(e) => {
+                            console.log('🔍 トグル変更イベント:', {
+                              checked: e.target.checked,
+                              currentState: enableHeadStorageNode,
+                              timestamp: new Date().toISOString()
+                            });
+                            handleHeadStorageNodeToggle(e.target.checked);
+                          }}
                           color="primary"
                         />
                       }
@@ -674,77 +799,296 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
 
                 <FormControl fullWidth sx={{ mb: 2 }}>
                   <InputLabel>投入材料・部品</InputLabel>
+                  {(() => {
+                    console.log('🔍 Select コンポーネント レンダリング:', {
+                      currentValue: newMaterial.materialId,
+                      currentMaterialName: newMaterial.materialName,
+                      newMaterial: newMaterial,
+                      productsCount: products.length,
+                      precedingProductsCount: getPrecedingOutputProducts().length,
+                      enableHeadStorageNode: enableHeadStorageNode,
+                      isActualHeadStorageNode: isActualHeadStorageNode(),
+                      timestamp: new Date().toISOString(),
+                      valueType: typeof newMaterial.materialId,
+                      isEmpty: !newMaterial.materialId,
+                      products: products.map(p => ({ id: p.id, name: p.name, type: p.type })),
+                      precedingProducts: getPrecedingOutputProducts().map(p => ({ id: p.id, name: p.name, type: p.type }))
+                    });
+                    return null;
+                  })()}
+                  
                   <Select
                     value={newMaterial.materialId || ''}
+                    open={selectOpen}
+                    onOpen={() => {
+                      console.log('🔍 ドロップダウンオープン:', {
+                        currentValue: newMaterial.materialId,
+                        availableProducts: products.length,
+                        precedingProducts: getPrecedingOutputProducts().length,
+                        isHeadStorageNode: isHeadStorageNode(),
+                        enableHeadStorageNode: enableHeadStorageNode,
+                        willShowAllProducts: true
+                      });
+                      setSelectOpen(true);
+                    }}
+                    onClose={() => {
+                      console.log('🔍 ドロップダウンクローズ:', {
+                        currentValue: newMaterial.materialId,
+                        timestamp: new Date().toISOString()
+                      });
+                      setSelectOpen(false);
+                    }}
                     onChange={(e) => {
-                      const selectedProduct = products.find(p => p.id === e.target.value);
+                      console.log('🔍 投入材料選択 onChange イベント発生:', {
+                        event: e,
+                        targetValue: e.target.value,
+                        targetType: typeof e.target.value,
+                        currentNewMaterial: newMaterial,
+                        eventType: e.type,
+                        eventTarget: e.target,
+                        eventCurrentTarget: e.currentTarget,
+                        timestamp: new Date().toISOString()
+                      });
+                      
+                      if (!e.target.value) {
+                        console.warn('⚠️ onChange イベントで値が空です');
+                        return;
+                      }
+                      
+                      // 先頭保管ノードがオフの状態では、前工程の出力製品も検索対象に含める
+                      const allAvailableProducts = enableHeadStorageNode 
+                        ? products 
+                        : [
+                            ...products,
+                            ...getPrecedingOutputProducts().map(p => ({
+                              id: p.id,
+                              name: p.name,
+                              type: p.type
+                            }))
+                          ];
+                      
+                      const selectedProduct = allAvailableProducts.find(p => p.id === e.target.value);
                       const precedingProduct = getPrecedingOutputProducts().find(p => p.id === e.target.value);
                       
-                      setNewMaterial({
+                      console.log('🔍 選択された製品情報:', {
+                        selectedProduct,
+                        precedingProduct,
+                        allProducts: products.length,
+                        precedingProducts: getPrecedingOutputProducts().length,
+                        allAvailableProducts: allAvailableProducts.length,
+                        products: products.map(p => ({ id: p.id, name: p.name, type: p.type })),
+                        enableHeadStorageNode,
+                        isActualHeadStorageNode: isActualHeadStorageNode()
+                      });
+                      
+                      if (!selectedProduct) {
+                        console.error('❌ 選択された製品が見つかりません:', {
+                          targetValue: e.target.value,
+                          allAvailableProducts: allAvailableProducts.map(p => ({ id: p.id, name: p.name, type: p.type }))
+                        });
+                        return;
+                      }
+                      
+                      const updatedMaterial = {
                         ...newMaterial,
                         materialId: e.target.value,
-                        materialName: selectedProduct?.name || '',
+                        materialName: selectedProduct.name,
                         // 前工程の出力製品の場合、関連情報を自動設定
                         ...(precedingProduct && {
                           originalProductId: precedingProduct.id,
                           storageLocation: `前工程: ${precedingProduct.processName}`,
                           supplyMethod: 'kanban' as any
                         })
+                      };
+                      
+                      console.log('🔍 更新後の材料データ:', updatedMaterial);
+                      
+                      setNewMaterial(updatedMaterial);
+                      
+                      // 選択後にドロップダウンを確実に閉じる
+                      setSelectOpen(false);
+                      
+                      // 選択後の状態を確認
+                      setTimeout(() => {
+                        console.log('🔍 選択後の newMaterial 状態:', newMaterial);
+                      }, 100);
+                    }}
+                    onMouseDown={(e) => {
+                      console.log('🔍 Select onMouseDown:', e);
+                    }}
+                    onFocus={(e) => {
+                      console.log('🔍 Select onFocus:', e);
+                    }}
+                    onBlur={(e) => {
+                      console.log('🔍 Select onBlur:', e);
+                    }}
+                    // 重要な設定: onChangeイベントを確実に発生させる
+                    multiple={false}
+                    native={false}
+                    variant="outlined"
+                    // イベントの伝播を確認
+                    onKeyDown={(e) => {
+                      console.log('🔍 Select onKeyDown:', e);
+                    }}
+                    onKeyUp={(e) => {
+                      console.log('🔍 Select onKeyUp:', e);
+                    }}
+                    // MUIの問題を解決するための設定
+                    renderValue={(value) => {
+                      // 先頭保管ノードがオフの状態では、前工程の出力製品も検索対象に含める
+                      const allAvailableProducts = enableHeadStorageNode 
+                        ? products 
+                        : [
+                            ...products,
+                            ...getPrecedingOutputProducts().map(p => ({
+                              id: p.id,
+                              name: p.name,
+                              type: p.type
+                            }))
+                          ];
+                      
+                      console.log('🔍 renderValue 呼び出し:', { 
+                        value, 
+                        newMaterial,
+                        products: products.map(p => ({ id: p.id, name: p.name })),
+                        allAvailableProducts: allAvailableProducts.map(p => ({ id: p.id, name: p.name })),
+                        foundProduct: allAvailableProducts.find(p => p.id === value),
+                        enableHeadStorageNode,
+                        isActualHeadStorageNode: isActualHeadStorageNode()
                       });
+                      
+                      const product = allAvailableProducts.find(p => p.id === value);
+                      return product ? product.name : '';
                     }}
                   >
-                    {/* 先頭保管ノードが有効な場合は全製品を表示 */}
-                    {isHeadStorageNode() && enableHeadStorageNode ? (
+                    {/* 先頭保管ノードが有効な場合のみ全製品を表示、それ以外は前工程の出力製品のみ */}
+                    {isActualHeadStorageNode() && enableHeadStorageNode ? (
                       <>
                         <Box>
                           <Typography variant="caption" color="success.main" sx={{ px: 2, py: 1, display: 'block' }}>
                             🎯 先頭保管ノード有効: 全製品から選択可能
-                      </Typography>
-                          {products.map((product) => (
-                            <MenuItem key={product.id} value={product.id}>
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                <MaterialIcon />
-                                <Typography>{product.name}</Typography>
-                            <Chip
-                                  label={product.type} 
-                              size="small"
-                                  color="default"
-                            />
-                              </Box>
-                            </MenuItem>
-                        ))}
-                    </Box>
+                          </Typography>
+                          {(() => {
+                            console.log('🔍 全製品MenuItem表示（先頭保管ノード有効）:', {
+                              productsCount: products.length,
+                              products: products.map(p => ({ id: p.id, name: p.name, type: p.type })),
+                              isHeadStorageNode: isHeadStorageNode(),
+                              isActualHeadStorageNode: isActualHeadStorageNode(),
+                              enableHeadStorageNode: enableHeadStorageNode
+                            });
+                            return null;
+                          })()}
+                          {products.map((product) => {
+                            console.log('🔍 MenuItem レンダリング（先頭保管ノード有効）:', {
+                              productId: product.id,
+                              productName: product.name,
+                              productType: product.type,
+                              value: product.id,
+                              currentValue: newMaterial.materialId
+                            });
+                            
+                            return (
+                              <MenuItem 
+                                key={product.id} 
+                                value={product.id}
+                                data-testid={`material-option-${product.id}`}
+                                dense={false}
+                                disableGutters={false}
+                                onClick={(e) => {
+                                  console.log('🔍 MenuItem クリックイベント（先頭保管ノード有効）:', {
+                                    productId: product.id,
+                                    productName: product.name,
+                                    productType: product.type,
+                                    event: e,
+                                    target: e.target,
+                                    currentTarget: e.currentTarget,
+                                    timestamp: new Date().toISOString()
+                                  });
+                                  
+                                  // 手動で状態を更新
+                                  const updatedMaterial = {
+                                    ...newMaterial,
+                                    materialId: product.id,
+                                    materialName: product.name
+                                  };
+                                  
+                                  console.log('🔍 手動更新の材料データ（先頭保管ノード有効）:', updatedMaterial);
+                                  setNewMaterial(updatedMaterial);
+                                  
+                                  // Selectコンポーネントのopen状態制御でドロップダウンを閉じる
+                                  setSelectOpen(false);
+                                }}
+                              >
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                  <MaterialIcon />
+                                  <Typography>{product.name}</Typography>
+                                  <Chip
+                                    label={product.type} 
+                                    size="small"
+                                    color="default"
+                                  />
+                                </Box>
+                              </MenuItem>
+                            );
+                          })}
+                        </Box>
                       </>
                     ) : (
-                      /* 通常の材料選択ロジック */
+                      /* 先頭保管ノードが無効な場合、または通常の材料選択ロジック */
                       <>
+                        {(() => {
+                          console.log('🔍 制限された材料選択ロジック実行:', {
+                            isHeadStorageNode: isHeadStorageNode(),
+                            isActualHeadStorageNode: isActualHeadStorageNode(),
+                            enableHeadStorageNode: enableHeadStorageNode,
+                            precedingProductsCount: getPrecedingOutputProducts().length,
+                            rawMaterialsCount: products.filter(p => p.type === 'raw_material').length,
+                            allProductsCount: products.length,
+                            timestamp: new Date().toISOString()
+                          });
+                          return null;
+                        })()}
                         {/* 前工程の出力製品を最優先表示 */}
                         {getPrecedingOutputProducts().length > 0 ? (
                           <>
                             <Box>
                               <Typography variant="caption" color="primary" sx={{ px: 2, py: 1, display: 'block' }}>
                                 🔗 前工程の出力製品（推奨）
-                  </Typography>
+                              </Typography>
                               {getPrecedingOutputProducts().map((product) => (
-                                <MenuItem key={`preceding_${product.id}`} value={product.id}>
+                                <MenuItem 
+                                  key={`preceding_${product.id}`} 
+                                  value={product.id}
+                                  data-testid={`preceding-material-option-${product.id}`}
+                                  onClick={(e) => {
+                                    console.log('🔍 前工程出力製品選択:', {
+                                      productId: product.id,
+                                      productName: product.name,
+                                      timestamp: new Date().toISOString()
+                                    });
+                                    
+                                    // Selectコンポーネントのopen状態制御でドロップダウンを閉じる
+                                    setSelectOpen(false);
+                                  }}
+                                >
                                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                                     <MaterialIcon />
                                     <Typography>{product.name}</Typography>
-                        <Chip
+                                    <Chip
                                       label={`前工程: ${product.processName}`}
                                       size="small" 
                                       color="primary"
-                          variant="outlined"
+                                      variant="outlined"
                                     />
                                     <Chip 
                                       label={product.type} 
-                          size="small"
+                                      size="small"
                                       color="default"
-                        />
+                                    />
                                   </Box>
                                 </MenuItem>
-                    ))}
-          </Box>
+                              ))}
+                            </Box>
 
                             {/* 原材料（前工程の出力製品がある場合） */}
                             {products.filter(p => p.type === 'raw_material').length > 0 && (
@@ -757,13 +1101,27 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                                   {products
                                     .filter(p => p.type === 'raw_material')
                                     .map((product) => (
-                                      <MenuItem key={product.id} value={product.id}>
+                                      <MenuItem 
+                                        key={product.id} 
+                                        value={product.id}
+                                        data-testid={`raw-material-option-${product.id}`}
+                                        onClick={(e) => {
+                                          console.log('🔍 原材料選択:', {
+                                            productId: product.id,
+                                            productName: product.name,
+                                            timestamp: new Date().toISOString()
+                                          });
+                                          
+                                          // Selectコンポーネントのopen状態制御でドロップダウンを閉じる
+                                          setSelectOpen(false);
+                                        }}
+                                      >
                                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                                           <MaterialIcon />
                                           <Typography>{product.name}</Typography>
                                           <Chip 
                                             label={product.type} 
-                            size="small"
+                                            size="small"
                                             color="default"
                                           />
                                         </Box>
@@ -778,11 +1136,25 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                           <Box>
                             <Typography variant="caption" color="text.secondary" sx={{ px: 2, py: 1, display: 'block' }}>
                               🌱 原材料
-            </Typography>
+                            </Typography>
                             {products
                               .filter(p => p.type === 'raw_material')
                               .map((product) => (
-                      <MenuItem key={product.id} value={product.id}>
+                                <MenuItem 
+                                  key={product.id} 
+                                  value={product.id}
+                                  data-testid={`raw-material-only-option-${product.id}`}
+                                  onClick={(e) => {
+                                    console.log('🔍 原材料選択（前工程なし）:', {
+                                      productId: product.id,
+                                      productName: product.name,
+                                      timestamp: new Date().toISOString()
+                                    });
+                                    
+                                    // Selectコンポーネントのopen状態制御でドロップダウンを閉じる
+                                    setSelectOpen(false);
+                                  }}
+                                >
                                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                                     <MaterialIcon />
                                     <Typography>{product.name}</Typography>
@@ -792,8 +1164,8 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                                       color="default"
                                     />
                                   </Box>
-                      </MenuItem>
-                    ))}
+                                </MenuItem>
+                              ))}
                           </Box>
                         )}
                       </>
@@ -1137,8 +1509,8 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                                 setNewMaterial({
                                   requiredQuantity: 1,
                                   unit: '個',
-                                  timing: 'start',
-                                  supplyMethod: 'manual',
+                                  timing: 'start' as const,
+                                  supplyMethod: 'manual' as const,
                                   storageLocation: '',
                                 });
                               }}
@@ -1347,7 +1719,37 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                   <InputLabel>出力製品</InputLabel>
                   <Select
                           value={newOutput.productId || ''}
-                          onChange={(e) => setNewOutput({ ...newOutput, productId: e.target.value })}
+                          onChange={(e) => {
+                            console.log('🔍 出力製品選択 onChange イベント:', {
+                              event: e,
+                              targetValue: e.target.value,
+                              currentNewOutput: newOutput
+                            });
+                            
+                            const selectedProduct = products.find(p => p.id === e.target.value);
+                            console.log('🔍 選択された出力製品:', selectedProduct);
+                            
+                            const updatedOutput = { ...newOutput, productId: e.target.value };
+                            console.log('🔍 更新後の出力データ:', updatedOutput);
+                            
+                            setNewOutput(updatedOutput);
+                            
+                            // 選択後の状態を確認
+                            setTimeout(() => {
+                              console.log('🔍 選択後の newOutput 状態:', newOutput);
+                            }, 100);
+                          }}
+                          onOpen={() => {
+                            console.log('🔍 出力製品ドロップダウンオープン:', {
+                              currentValue: newOutput.productId,
+                              availableProducts: products.length
+                            });
+                          }}
+                          onClose={() => {
+                            console.log('🔍 出力製品ドロップダウンクローズ:', {
+                              finalValue: newOutput.productId
+                            });
+                          }}
                   >
                           {products.map((product) => (
                       <MenuItem key={product.id} value={product.id}>

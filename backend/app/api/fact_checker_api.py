@@ -402,3 +402,5 @@ def get_enhanced_fact_checker() -> EnhancedFactChecker:
     """強化されたファクトチェッカーを取得"""
     return enhanced_fact_checker
 
+
+

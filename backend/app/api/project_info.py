@@ -122,3 +122,5 @@ async def check_simulation_ready(project_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"シミュレーション可能性チェックエラー: {str(e)}")
 
+
+

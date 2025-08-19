@@ -424,3 +424,5 @@ def get_persistence_manager() -> PersistenceManager:
     """永続化マネージャーを取得"""
     return persistence_manager
 
+
+
