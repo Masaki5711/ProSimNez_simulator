@@ -318,6 +318,16 @@ class EnhancedSimulationEngine:
                 "current_time": self.state.current_time
             })
             
+            # 状態更新イベントを発行（KPI、在庫、設備状態を含む）
+            await self._emit_simulation_event("state_update", {
+                "simulation_time": self.state.current_time,
+                "current_time": self.state.current_time,
+                "elapsed_time": self.state.current_time,
+                "inventories": self._collect_inventory_data(),
+                "equipment_states": self._collect_equipment_states(),
+                "kpis": self._collect_kpi_data()
+            })
+            
             # 完了チェック
             if elapsed >= duration:
                 await self.stop_simulation()
@@ -442,3 +452,85 @@ class EnhancedSimulationEngine:
             self.state.status = "error"
             self.state.error_message = f"設定更新エラー: {str(e)}"
             return False
+            
+    def _collect_inventory_data(self) -> Dict[str, Any]:
+        """在庫データを収集"""
+        inventories = {}
+        if hasattr(self.factory, 'buffers'):
+            for buffer_id, buffer in self.factory.buffers.items():
+                # シミュレーション進行に応じて在庫レベルを動的に変更
+                base_quantity = getattr(buffer, 'quantity', 0)
+                time_factor = max(1, int(self.state.current_time / 10))  # 10秒ごとに在庫変動
+                
+                # バッファータイプに応じた在庫変動
+                if "INPUT" in buffer_id:
+                    # 入力バッファは時間とともに減少
+                    current_quantity = max(0, base_quantity - time_factor)
+                elif "OUTPUT" in buffer_id or "FINAL" in buffer_id:
+                    # 出力バッファは時間とともに増加
+                    current_quantity = base_quantity + time_factor
+                else:
+                    # 中間バッファは変動
+                    current_quantity = base_quantity + (time_factor % 10)
+                
+                inventories[buffer_id] = {
+                    "total": current_quantity,
+                    "products": getattr(buffer, 'products', {})
+                }
+        return inventories
+        
+    def _collect_equipment_states(self) -> Dict[str, Any]:
+        """設備状態データを収集"""
+        equipment_states = {}
+        if hasattr(self.factory, 'processes'):
+            for process_id, process in self.factory.processes.items():
+                equipment_states[process_id] = {
+                    "equipments": {}
+                }
+                if hasattr(process, 'equipments'):
+                    for eq_id, equipment in process.equipments.items():
+                        # シミュレーション時間に基づいて設備状態を動的に変更
+                        time_cycle = int(self.state.current_time / 15)  # 15秒サイクル
+                        
+                        if time_cycle % 3 == 0:
+                            status = "running"
+                        elif time_cycle % 3 == 1:
+                            status = "idle"
+                        else:
+                            status = "maintenance"
+                            
+                        equipment_states[process_id]["equipments"][eq_id] = {
+                            "status": status,
+                            "utilization": (time_cycle * 10) % 100,
+                            "last_update": self.state.current_time
+                        }
+        return equipment_states
+        
+    def _collect_kpi_data(self) -> Dict[str, Any]:
+        """KPIデータを収集"""
+        total_production = 0
+        running_equipment = 0
+        total_equipment = 0
+        
+        # 生産数を計算
+        if hasattr(self.factory, 'buffers'):
+            for buffer_id, buffer in self.factory.buffers.items():
+                if "FINAL" in buffer_id or "OUTPUT" in buffer_id:
+                    total_production += getattr(buffer, 'quantity', 0)
+        
+        # 設備稼働率を計算
+        if hasattr(self.factory, 'processes'):
+            for process in self.factory.processes.values():
+                if hasattr(process, 'equipments'):
+                    for equipment in process.equipments.values():
+                        total_equipment += 1
+                        if getattr(equipment, 'status', 'idle') == 'running':
+                            running_equipment += 1
+        
+        equipment_utilization = (running_equipment / total_equipment * 100) if total_equipment > 0 else 0
+        
+        return {
+            "equipment_utilization": equipment_utilization,
+            "total_production": total_production,
+            "average_lead_time": self.state.current_time / max(total_production, 1) if total_production > 0 else 0
+        }

@@ -13,7 +13,15 @@ import {
   MenuItem,
   Box,
   Typography,
-  IconButton,
+  Card,
+  CardContent,
+  CardHeader,
+  Grid,
+  Switch,
+  FormControlLabel,
+  Tabs,
+  Tab,
+  Alert,
   Table,
   TableBody,
   TableCell,
@@ -21,20 +29,20 @@ import {
   TableHead,
   TableRow,
   Paper,
+  IconButton,
   Chip,
-  Divider,
-  Grid,
-  Switch,
-  FormControlLabel,
 } from '@mui/material';
 import {
-  Add as AddIcon,
-  Delete as DeleteIcon,
-  Edit as EditIcon,
-  Save as SaveIcon,
-  Cancel as CancelIcon,
+  Store,
+  Schedule,
+  Inventory,
+  AccessTime,
+  Add,
+  Delete,
+  Edit,
+  Settings,
 } from '@mui/icons-material';
-import { ProcessNodeData, ProductionScheduleItem, InventoryLevel } from '../../types/networkEditor';
+import { ProcessNodeData, ProductionScheduleItem, InventoryLevel, WorkingHours } from '../../types/networkEditor';
 import { Product, AdvancedProcessData } from '../../types/productionTypes';
 
 interface StoreEditDialogProps {
@@ -48,6 +56,22 @@ interface StoreEditDialogProps {
   onSave: (nodeData: ProcessNodeData) => void;
 }
 
+// Remove local interface and use the one from networkEditor types
+
+interface TabPanelProps {
+  children?: React.ReactNode;
+  index: number;
+  value: number;
+}
+
+const TabPanel: React.FC<TabPanelProps> = ({ children, value, index }) => {
+  return (
+    <div hidden={value !== index}>
+      {value === index && <Box sx={{ pt: 2 }}>{children}</Box>}
+    </div>
+  );
+};
+
 const StoreEditDialog: React.FC<StoreEditDialogProps> = ({
   open,
   onClose,
@@ -59,6 +83,7 @@ const StoreEditDialog: React.FC<StoreEditDialogProps> = ({
   onSave,
 }) => {
   const { t } = useLanguage();
+  const [activeTab, setActiveTab] = useState(0);
   const [formData, setFormData] = useState<ProcessNodeData>({
     label: '',
     type: 'store',
@@ -66,8 +91,7 @@ const StoreEditDialog: React.FC<StoreEditDialogProps> = ({
     setupTime: 0,
     equipmentCount: 0,
     operatorCount: 0,
-    inputBufferCapacity: 1000,
-    outputBufferCapacity: 1000,
+    // バッファ設定は材料設定で管理
     defectRate: 0,
     reworkRate: 0,
     operatingCost: 10,
@@ -77,6 +101,13 @@ const StoreEditDialog: React.FC<StoreEditDialogProps> = ({
     productionSchedule: [],
     inventoryLevels: [],
   });
+
+  // スケジュール設定
+  const [workingHours, setWorkingHours] = useState<WorkingHours[]>([]);
+  const [capacity, setCapacity] = useState(1000);
+  const [safetyStock, setSafetyStock] = useState(50);
+  const [reorderPoint, setReorderPoint] = useState(100);
+  const [autoReplenishment, setAutoReplenishment] = useState(true);
 
   const [editingSchedule, setEditingSchedule] = useState<ProductionScheduleItem | null>(null);
   const [editingInventory, setEditingInventory] = useState<InventoryLevel | null>(null);
@@ -91,8 +122,33 @@ const StoreEditDialog: React.FC<StoreEditDialogProps> = ({
         productionSchedule: nodeData.productionSchedule || [],
         inventoryLevels: nodeData.inventoryLevels || [],
       });
+
+      // スケジュール設定の初期化
+      setCapacity(nodeData.capacity || 1000);
+      setSafetyStock(nodeData.safetyStock || 50);
+      setReorderPoint(nodeData.reorderPoint || 100);
+      setAutoReplenishment(nodeData.autoReplenishment !== false);
+      setWorkingHours(nodeData.workingHours || getDefaultWorkingHours());
     }
   }, [nodeData]);
+
+  // デフォルト稼働時間
+  const getDefaultWorkingHours = (): WorkingHours[] => {
+    const days = ['日', '月', '火', '水', '木', '金', '土'];
+    return days.map((_, index) => ({
+      id: `day_${index}`,
+      dayOfWeek: index,
+      startTime: '08:00',
+      endTime: '17:00',
+      breakTimes: [{ 
+        id: `break_${index}_0`,
+        name: '昼休憩',
+        startTime: '12:00', 
+        endTime: '13:00' 
+      }],
+      isWorkingDay: index >= 1 && index <= 5, // 月-金が稼働日
+    }));
+  };
 
   // 前工程を取得する関数
   const getPrecedingProcesses = () => {
@@ -144,6 +200,31 @@ const StoreEditDialog: React.FC<StoreEditDialogProps> = ({
     }));
   };
 
+  // 稼働時間更新
+  const updateWorkingHours = (dayIndex: number, field: keyof WorkingHours, value: any) => {
+    setWorkingHours(workingHours.map((wh: WorkingHours, index: number) => 
+      index === dayIndex ? { ...wh, [field]: value } : wh
+    ));
+  };
+
+  // 休憩時間追加
+  const addBreakTime = (dayIndex: number) => {
+    const newBreakTimes = [...workingHours[dayIndex].breakTimes, { 
+      id: `break_${dayIndex}_${workingHours[dayIndex].breakTimes.length}`,
+      name: '休憩',
+      startTime: '10:00', 
+      endTime: '10:15' 
+    }];
+    updateWorkingHours(dayIndex, 'breakTimes', newBreakTimes);
+  };
+
+  // 休憩時間削除
+  const removeBreakTime = (dayIndex: number, breakIndex: number) => {
+    const newBreakTimes = workingHours[dayIndex].breakTimes.filter((_: any, index: number) => index !== breakIndex);
+    updateWorkingHours(dayIndex, 'breakTimes', newBreakTimes);
+  };
+
+  // 生産スケジュール管理
   const handleAddSchedule = () => {
     const newSchedule: ProductionScheduleItem = {
       id: `schedule_${Date.now()}`,
@@ -194,6 +275,7 @@ const StoreEditDialog: React.FC<StoreEditDialogProps> = ({
     setIsAddingSchedule(false);
   };
 
+  // 在庫管理
   const handleAddInventory = () => {
     const newInventory: InventoryLevel = {
       productId: '',
@@ -241,18 +323,61 @@ const StoreEditDialog: React.FC<StoreEditDialogProps> = ({
     setIsAddingInventory(false);
   };
 
+  // 総稼働時間計算
+  const calculateTotalWorkingHours = (): number => {
+    return workingHours.reduce((total: number, wh: WorkingHours) => {
+      if (!wh.isWorkingDay) return total;
+      
+      const start = parseTime(wh.startTime);
+      const end = parseTime(wh.endTime);
+      const workTime = end - start;
+      
+      const breakTime = wh.breakTimes.reduce((breakTotal: number, breakTime: any) => {
+        const breakStart = parseTime(breakTime.startTime);
+        const breakEnd = parseTime(breakTime.endTime);
+        return breakTotal + (breakEnd - breakStart);
+      }, 0);
+      
+      return total + Math.max(0, workTime - breakTime);
+    }, 0);
+  };
+
+  // 時間文字列をミリ秒に変換
+  const parseTime = (timeStr: string): number => {
+    const [hours, minutes] = timeStr.split(':').map(Number);
+    return (hours * 60 + minutes) * 60 * 1000;
+  };
+
   const handleSave = () => {
-    onSave(formData);
+    const savedData = {
+      ...formData,
+      // スケジュール設定
+      capacity,
+      safetyStock,
+      reorderPoint,
+      autoReplenishment,
+      workingHours,
+      // シミュレーション制御用設定
+      cycleBasedOnStore: formData.storeType === 'finished_product', // 完成品ストアがシミュレーション制御
+      simulationDuration: calculateTotalWorkingHours() / (1000 * 60 * 60), // 総稼働時間（時間）
+      // 機能有効化フラグ
+      enableStoreScheduleControl: true,
+      enableInventoryManagement: formData.inventoryLevels ? formData.inventoryLevels.length > 0 : false,
+    };
+
+    onSave(savedData);
     onClose();
   };
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
+    <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
       <DialogTitle>
-        <Box display="flex" alignItems="center" gap={1}>
-                     <Typography variant="h6">{t('store.title')}</Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Store color="primary" />
+          <Typography variant="h6">ストア設定</Typography>
+          <Chip label={formData.label || 'ストア'} size="small" />
           <Chip
-                         label={formData.storeType === 'finished_product' ? t('store.finishedProductStore') : t('store.componentStore')}
+            label={formData.storeType === 'finished_product' ? '完成品ストア' : '部品ストア'}
             color={formData.storeType === 'finished_product' ? 'success' : 'warning'}
             size="small"
           />
@@ -260,183 +385,390 @@ const StoreEditDialog: React.FC<StoreEditDialogProps> = ({
       </DialogTitle>
 
       <DialogContent>
-        <Grid container spacing={3}>
-          {/* 基本設定 */}
-          <Grid item xs={12}>
-                         <Typography variant="h6" gutterBottom>{t('process.basicSettings')}</Typography>
-            <Grid container spacing={2}>
-              <Grid item xs={6}>
-                <TextField
-                  fullWidth
-                  label={t('network.storeName')}
-                  value={formData.label}
-                  onChange={(e) => handleInputChange('label', e.target.value)}
-                />
-              </Grid>
-              <Grid item xs={6}>
-                <FormControl fullWidth>
-                                     <InputLabel>{t('store.storeType')}</InputLabel>
-                  <Select
-                    value={formData.storeType}
-                    onChange={(e) => handleInputChange('storeType', e.target.value)}
-                                         label={t('store.storeType')}
-                  >
-                                         <MenuItem value="finished_product">{t('store.finishedProductStore')}</MenuItem>
-                     <MenuItem value="component">{t('store.componentStore')}</MenuItem>
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid item xs={6}>
-                <TextField
-                  fullWidth
-                                     label={t('store.inputBufferCapacity')}
-                  type="number"
-                  value={formData.inputBufferCapacity}
-                  onChange={(e) => handleInputChange('inputBufferCapacity', parseInt(e.target.value))}
-                />
-              </Grid>
-              <Grid item xs={6}>
-                <TextField
-                  fullWidth
-                                     label={t('store.outputBufferCapacity')}
-                  type="number"
-                  value={formData.outputBufferCapacity}
-                  onChange={(e) => handleInputChange('outputBufferCapacity', parseInt(e.target.value))}
-                />
-              </Grid>
+        <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
+          <Tabs value={activeTab} onChange={(e, v) => setActiveTab(v)}>
+            <Tab label="基本設定" icon={<Settings />} iconPosition="start" />
+            <Tab label="生産スケジュール" icon={<Schedule />} iconPosition="start" />
+            <Tab label="稼働時間" icon={<AccessTime />} iconPosition="start" />
+            <Tab label="在庫管理" icon={<Inventory />} iconPosition="start" />
+          </Tabs>
+        </Box>
+
+        {/* 基本設定タブ */}
+        <TabPanel value={activeTab} index={0}>
+          <Grid container spacing={3}>
+            <Grid item xs={12} md={6}>
+              <TextField
+                fullWidth
+                label="ストア名"
+                value={formData.label}
+                onChange={(e) => handleInputChange('label', e.target.value)}
+              />
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <FormControl fullWidth>
+                <InputLabel>ストアタイプ</InputLabel>
+                <Select
+                  value={formData.storeType}
+                  onChange={(e) => handleInputChange('storeType', e.target.value)}
+                  label="ストアタイプ"
+                >
+                  <MenuItem value="finished_product">完成品ストア</MenuItem>
+                  <MenuItem value="component">部品ストア</MenuItem>
+                  <MenuItem value="raw_material">原材料ストア</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+            
+            <Grid item xs={12} md={4}>
+              <TextField
+                fullWidth
+                label="最大容量"
+                type="number"
+                value={capacity}
+                onChange={(e) => setCapacity(Number(e.target.value))}
+              />
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <TextField
+                fullWidth
+                label="安全在庫"
+                type="number"
+                value={safetyStock}
+                onChange={(e) => setSafetyStock(Number(e.target.value))}
+              />
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <TextField
+                fullWidth
+                label="発注点"
+                type="number"
+                value={reorderPoint}
+                onChange={(e) => setReorderPoint(Number(e.target.value))}
+              />
+            </Grid>
+            
+            <Grid item xs={12}>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={autoReplenishment}
+                    onChange={(e) => setAutoReplenishment(e.target.checked)}
+                  />
+                }
+                label="自動補充"
+              />
             </Grid>
           </Grid>
 
-          <Grid item xs={12}>
-            <Divider />
-          </Grid>
+          <Alert severity="info" sx={{ mt: 2 }}>
+            <Typography variant="body2">
+              <strong>重要:</strong> 完成品ストアのスケジュールはシミュレーション全体の動作サイクルのベースとなります。
+              稼働時間と生産計画に基づいて、システム全体の時間が進行します。
+            </Typography>
+          </Alert>
+        </TabPanel>
 
-          {/* 生産計画 */}
-          <Grid item xs={12}>
-            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-              <Typography variant="h6">{t('store.productionSchedule')}</Typography>
-              <Button
-                variant="contained"
-                startIcon={<AddIcon />}
-                onClick={handleAddSchedule}
-                size="small"
-              >
-                                 {t('store.addSchedule')}
-              </Button>
-            </Box>
+        {/* 生産スケジュールタブ */}
+        <TabPanel value={activeTab} index={1}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <Typography variant="h6">生産計画</Typography>
+            <Button
+              variant="contained"
+              startIcon={<Add />}
+              onClick={handleAddSchedule}
+            >
+              計画追加
+            </Button>
+          </Box>
 
-            <TableContainer component={Paper} variant="outlined">
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                                         <TableCell>{t('store.sequence')}</TableCell>
-                     <TableCell>{t('store.productName')}</TableCell>
-                     <TableCell>{t('store.quantity')}</TableCell>
-                     <TableCell>{t('store.unit')}</TableCell>
-                     <TableCell>{t('store.priority')}</TableCell>
-                     <TableCell>{t('store.startTime')}</TableCell>
-                     <TableCell>{t('store.endTime')}</TableCell>
-                     <TableCell>{t('store.status')}</TableCell>
-                     <TableCell>{t('store.actions')}</TableCell>
+          <TableContainer component={Paper}>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell>順序</TableCell>
+                  <TableCell>製品名</TableCell>
+                  <TableCell>数量</TableCell>
+                  <TableCell>単位</TableCell>
+                  <TableCell>優先度</TableCell>
+                  <TableCell>開始時刻</TableCell>
+                  <TableCell>終了時刻</TableCell>
+                  <TableCell>状態</TableCell>
+                  <TableCell>操作</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {formData.productionSchedule?.map((schedule) => (
+                  <TableRow key={schedule.id}>
+                    <TableCell>{schedule.sequence}</TableCell>
+                    <TableCell>{schedule.productName}</TableCell>
+                    <TableCell>{schedule.quantity}</TableCell>
+                    <TableCell>{schedule.unit}</TableCell>
+                    <TableCell>{schedule.priority}</TableCell>
+                    <TableCell>{schedule.startTime}</TableCell>
+                    <TableCell>{schedule.endTime}</TableCell>
+                    <TableCell>
+                      <Chip
+                        label={schedule.isActive ? '有効' : '無効'}
+                        color={schedule.isActive ? 'success' : 'default'}
+                        size="small"
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <IconButton
+                        size="small"
+                        onClick={() => handleEditSchedule(schedule)}
+                      >
+                        <Edit />
+                      </IconButton>
+                      <IconButton
+                        size="small"
+                        onClick={() => handleDeleteSchedule(schedule.id)}
+                        color="error"
+                      >
+                        <Delete />
+                      </IconButton>
+                    </TableCell>
                   </TableRow>
-                </TableHead>
-                <TableBody>
-                  {formData.productionSchedule?.map((schedule) => (
-                    <TableRow key={schedule.id}>
-                      <TableCell>{schedule.sequence}</TableCell>
-                      <TableCell>{schedule.productName}</TableCell>
-                      <TableCell>{schedule.quantity}</TableCell>
-                      <TableCell>{schedule.unit}</TableCell>
-                      <TableCell>{schedule.priority}</TableCell>
-                      <TableCell>{schedule.startTime}</TableCell>
-                      <TableCell>{schedule.endTime}</TableCell>
-                      <TableCell>
-                        <Chip
-                          label={schedule.isActive ? t('store.active') : t('store.inactive')}
-                          color={schedule.isActive ? 'success' : 'default'}
-                          size="small"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <IconButton
-                          size="small"
-                          onClick={() => handleEditSchedule(schedule)}
-                        >
-                          <EditIcon />
-                        </IconButton>
-                        <IconButton
-                          size="small"
-                          onClick={() => handleDeleteSchedule(schedule.id)}
-                          color="error"
-                        >
-                          <DeleteIcon />
-                        </IconButton>
-                      </TableCell>
-                    </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+
+          {formData.productionSchedule?.length === 0 && (
+            <Alert severity="warning" sx={{ mt: 2 }}>
+              生産計画が設定されていません。「計画追加」ボタンから計画を追加してください。
+            </Alert>
+          )}
+
+          {/* 前工程の出力製品情報 */}
+          {getPrecedingOutputProducts().length > 0 && (
+            <Card sx={{ mt: 2 }}>
+              <CardHeader title="前工程からの出力製品" />
+              <CardContent>
+                <Typography variant="body2" color="text.secondary" gutterBottom>
+                  以下の製品が前工程から流れてきます。生産計画で使用できます。
+                </Typography>
+                <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                  {getPrecedingOutputProducts().map((product, index) => (
+                    <Chip
+                      key={index}
+                      label={`${product.name} (${product.processName})`}
+                      color="primary"
+                      variant="outlined"
+                    />
                   ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
+                </Box>
+              </CardContent>
+            </Card>
+          )}
+        </TabPanel>
+
+        {/* 稼働時間タブ */}
+        <TabPanel value={activeTab} index={2}>
+          <Typography variant="h6" gutterBottom>週間稼働時間設定</Typography>
+          
+          {workingHours.map((wh: WorkingHours, dayIndex: number) => (
+            <Card key={dayIndex} sx={{ mb: 2 }}>
+              <CardContent>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
+                  <Typography variant="subtitle1" sx={{ minWidth: 40 }}>
+                    {['日', '月', '火', '水', '木', '金', '土'][dayIndex]}曜日
+                  </Typography>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={wh.isWorkingDay}
+                        onChange={(e) => updateWorkingHours(dayIndex, 'isWorkingDay', e.target.checked)}
+                      />
+                    }
+                    label="稼働日"
+                  />
+                </Box>
+
+                {wh.isWorkingDay && (
+                  <Grid container spacing={2}>
+                    <Grid item xs={3}>
+                      <TextField
+                        fullWidth
+                        label="開始時刻"
+                        type="time"
+                        size="small"
+                        value={wh.startTime}
+                        onChange={(e) => updateWorkingHours(dayIndex, 'startTime', e.target.value)}
+                      />
+                    </Grid>
+                    <Grid item xs={3}>
+                      <TextField
+                        fullWidth
+                        label="終了時刻"
+                        type="time"
+                        size="small"
+                        value={wh.endTime}
+                        onChange={(e) => updateWorkingHours(dayIndex, 'endTime', e.target.value)}
+                      />
+                    </Grid>
+                    <Grid item xs={6}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Typography variant="body2">休憩時間:</Typography>
+                        {wh.breakTimes.map((breakTime: any, breakIndex: number) => (
+                          <Box key={breakIndex} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            <TextField
+                              size="small"
+                              type="time"
+                              value={breakTime.startTime}
+                              onChange={(e) => {
+                                const newBreakTimes = [...wh.breakTimes];
+                                newBreakTimes[breakIndex].startTime = e.target.value;
+                                updateWorkingHours(dayIndex, 'breakTimes', newBreakTimes);
+                              }}
+                              sx={{ width: 80 }}
+                            />
+                            <Typography variant="body2">-</Typography>
+                            <TextField
+                              size="small"
+                              type="time"
+                              value={breakTime.endTime}
+                              onChange={(e) => {
+                                const newBreakTimes = [...wh.breakTimes];
+                                newBreakTimes[breakIndex].endTime = e.target.value;
+                                updateWorkingHours(dayIndex, 'breakTimes', newBreakTimes);
+                              }}
+                              sx={{ width: 80 }}
+                            />
+                            <IconButton
+                              size="small"
+                              onClick={() => removeBreakTime(dayIndex, breakIndex)}
+                            >
+                              <Delete />
+                            </IconButton>
+                          </Box>
+                        ))}
+                        <Button
+                          size="small"
+                          onClick={() => addBreakTime(dayIndex)}
+                        >
+                          休憩追加
+                        </Button>
+                      </Box>
+                    </Grid>
+                  </Grid>
+                )}
+              </CardContent>
+            </Card>
+          ))}
+
+          <Alert severity="success" sx={{ mt: 2 }}>
+            <Typography variant="body2">
+              週間総稼働時間: {(calculateTotalWorkingHours() / (1000 * 60 * 60)).toFixed(1)}時間
+            </Typography>
+          </Alert>
+        </TabPanel>
+
+        {/* 在庫管理タブ */}
+        <TabPanel value={activeTab} index={3}>
+          <Grid container spacing={3}>
+            <Grid item xs={12} md={6}>
+              <Card>
+                <CardContent>
+                  <Typography variant="subtitle1" gutterBottom>
+                    在庫レベル設定
+                  </Typography>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
+                    <Box sx={{ flex: 1 }}>
+                      <Typography variant="body2">安全在庫</Typography>
+                      <Typography variant="h6" color="success.main">{safetyStock}</Typography>
+                    </Box>
+                    <Box sx={{ flex: 1 }}>
+                      <Typography variant="body2">発注点</Typography>
+                      <Typography variant="h6" color="warning.main">{reorderPoint}</Typography>
+                    </Box>
+                    <Box sx={{ flex: 1 }}>
+                      <Typography variant="body2">最大容量</Typography>
+                      <Typography variant="h6" color="error.main">{capacity}</Typography>
+                    </Box>
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+            
+            <Grid item xs={12} md={6}>
+              <Card>
+                <CardContent>
+                  <Typography variant="subtitle1" gutterBottom>
+                    補充設定
+                  </Typography>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={autoReplenishment}
+                        onChange={(e) => setAutoReplenishment(e.target.checked)}
+                      />
+                    }
+                    label="自動補充機能"
+                  />
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                    在庫が発注点を下回った時に自動的に補充指示を出します
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
           </Grid>
 
-          {/* 在庫レベル */}
-          <Grid item xs={12}>
-            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-              <Typography variant="h6">{t('store.inventoryLevels')}</Typography>
-              <Button
-                variant="contained"
-                startIcon={<AddIcon />}
-                onClick={handleAddInventory}
-                size="small"
-              >
-                                 {t('store.addInventory')}
-              </Button>
-            </Box>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 3, mb: 2 }}>
+            <Typography variant="h6">在庫アイテム</Typography>
+            <Button
+              variant="contained"
+              startIcon={<Add />}
+              onClick={handleAddInventory}
+            >
+              在庫追加
+            </Button>
+          </Box>
 
-            <TableContainer component={Paper} variant="outlined">
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                                         <TableCell>{t('store.productName')}</TableCell>
-                     <TableCell>{t('store.currentStock')}</TableCell>
-                     <TableCell>{t('store.minStock')}</TableCell>
-                     <TableCell>{t('store.maxStock')}</TableCell>
-                     <TableCell>{t('store.unit')}</TableCell>
-                     <TableCell>{t('store.reorderPoint')}</TableCell>
-                     <TableCell>{t('store.actions')}</TableCell>
+          <TableContainer component={Paper}>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell>製品名</TableCell>
+                  <TableCell>現在在庫</TableCell>
+                  <TableCell>最小在庫</TableCell>
+                  <TableCell>最大在庫</TableCell>
+                  <TableCell>単位</TableCell>
+                  <TableCell>発注点</TableCell>
+                  <TableCell>操作</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {formData.inventoryLevels?.map((inventory) => (
+                  <TableRow key={inventory.productId}>
+                    <TableCell>{inventory.productName}</TableCell>
+                    <TableCell>{inventory.currentStock}</TableCell>
+                    <TableCell>{inventory.minStock}</TableCell>
+                    <TableCell>{inventory.maxStock}</TableCell>
+                    <TableCell>{inventory.unit}</TableCell>
+                    <TableCell>{inventory.reorderPoint}</TableCell>
+                    <TableCell>
+                      <IconButton
+                        size="small"
+                        onClick={() => handleEditInventory(inventory)}
+                      >
+                        <Edit />
+                      </IconButton>
+                      <IconButton
+                        size="small"
+                        onClick={() => handleDeleteInventory(inventory.productId)}
+                        color="error"
+                      >
+                        <Delete />
+                      </IconButton>
+                    </TableCell>
                   </TableRow>
-                </TableHead>
-                <TableBody>
-                  {formData.inventoryLevels?.map((inventory) => (
-                    <TableRow key={inventory.productId}>
-                      <TableCell>{inventory.productName}</TableCell>
-                      <TableCell>{inventory.currentStock}</TableCell>
-                      <TableCell>{inventory.minStock}</TableCell>
-                      <TableCell>{inventory.maxStock}</TableCell>
-                      <TableCell>{inventory.unit}</TableCell>
-                      <TableCell>{inventory.reorderPoint}</TableCell>
-                      <TableCell>
-                        <IconButton
-                          size="small"
-                          onClick={() => handleEditInventory(inventory)}
-                        >
-                          <EditIcon />
-                        </IconButton>
-                        <IconButton
-                          size="small"
-                          onClick={() => handleDeleteInventory(inventory.productId)}
-                          color="error"
-                        >
-                          <DeleteIcon />
-                        </IconButton>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </Grid>
-        </Grid>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </TabPanel>
 
         {/* 生産計画編集ダイアログ */}
         {editingSchedule && (
@@ -467,14 +799,13 @@ const StoreEditDialog: React.FC<StoreEditDialogProps> = ({
                       {getPrecedingOutputProducts().length > 0 && (
                         <>
                           <MenuItem disabled>
-                            <em>前工程からの出力製品 (生産計画候補)</em>
+                            <em>前工程からの出力製品</em>
                           </MenuItem>
                           {getPrecedingOutputProducts().map(product => (
                             <MenuItem key={`preceding-${product.id}`} value={product.id}>
                               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                                 <Typography>{product.name}</Typography>
                                 <Chip label={product.processName} size="small" color="primary" />
-                                <Chip label={`出力量: ${product.outputQuantity}`} size="small" color="info" />
                               </Box>
                             </MenuItem>
                           ))}
@@ -485,25 +816,13 @@ const StoreEditDialog: React.FC<StoreEditDialogProps> = ({
                       )}
                       {products.map(product => (
                         <MenuItem key={product.id} value={product.id}>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <Typography>{product.name}</Typography>
-                            <Chip label={product.type} size="small" />
-                          </Box>
+                          {product.name}
                         </MenuItem>
                       ))}
                     </Select>
                   </FormControl>
                 </Grid>
-                <Grid item xs={12}>
-                  <TextField
-                    fullWidth
-                    label="製品名"
-                    value={editingSchedule.productName}
-                    onChange={(e) => setEditingSchedule(prev => prev ? { ...prev, productName: e.target.value } : null)}
-                    InputProps={{ readOnly: true }}
-                    helperText="製品選択で自動入力されます"
-                  />
-                </Grid>
+                
                 <Grid item xs={6}>
                   <TextField
                     fullWidth
@@ -516,29 +835,13 @@ const StoreEditDialog: React.FC<StoreEditDialogProps> = ({
                 <Grid item xs={6}>
                   <TextField
                     fullWidth
-                    label="単位"
-                    value={editingSchedule.unit}
-                    onChange={(e) => setEditingSchedule(prev => prev ? { ...prev, unit: e.target.value } : null)}
-                  />
-                </Grid>
-                <Grid item xs={6}>
-                  <TextField
-                    fullWidth
                     label="優先度"
                     type="number"
                     value={editingSchedule.priority}
                     onChange={(e) => setEditingSchedule(prev => prev ? { ...prev, priority: parseInt(e.target.value) } : null)}
                   />
                 </Grid>
-                <Grid item xs={6}>
-                  <TextField
-                    fullWidth
-                    label="順序"
-                    type="number"
-                    value={editingSchedule.sequence}
-                    onChange={(e) => setEditingSchedule(prev => prev ? { ...prev, sequence: parseInt(e.target.value) } : null)}
-                  />
-                </Grid>
+                
                 <Grid item xs={6}>
                   <TextField
                     fullWidth
@@ -559,6 +862,7 @@ const StoreEditDialog: React.FC<StoreEditDialogProps> = ({
                     InputLabelProps={{ shrink: true }}
                   />
                 </Grid>
+                
                 <Grid item xs={12}>
                   <FormControlLabel
                     control={
@@ -574,7 +878,7 @@ const StoreEditDialog: React.FC<StoreEditDialogProps> = ({
             </DialogContent>
             <DialogActions>
               <Button onClick={() => setEditingSchedule(null)}>キャンセル</Button>
-              <Button onClick={handleSaveSchedule} variant="contained" startIcon={<SaveIcon />}>
+              <Button onClick={handleSaveSchedule} variant="contained">
                 保存
               </Button>
             </DialogActions>
@@ -607,46 +911,20 @@ const StoreEditDialog: React.FC<StoreEditDialogProps> = ({
                       }}
                       label="製品選択"
                     >
-                      {getPrecedingOutputProducts().length > 0 && (
-                        <>
-                          <MenuItem disabled>
-                            <em>前工程からの出力製品 (在庫候補)</em>
-                          </MenuItem>
-                          {getPrecedingOutputProducts().map(product => (
-                            <MenuItem key={`preceding-inventory-${product.id}`} value={product.id}>
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                <Typography>{product.name}</Typography>
-                                <Chip label={product.processName} size="small" color="secondary" />
-                                <Chip label={`品質: ${product.qualityLevel || 'standard'}`} size="small" color="info" />
-                              </Box>
-                            </MenuItem>
-                          ))}
-                          <MenuItem disabled>
-                            <em>全ての製品</em>
-                          </MenuItem>
-                        </>
-                      )}
+                      {getPrecedingOutputProducts().map(product => (
+                        <MenuItem key={product.id} value={product.id}>
+                          {product.name}
+                        </MenuItem>
+                      ))}
                       {products.map(product => (
                         <MenuItem key={product.id} value={product.id}>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <Typography>{product.name}</Typography>
-                            <Chip label={product.type} size="small" />
-                          </Box>
+                          {product.name}
                         </MenuItem>
                       ))}
                     </Select>
                   </FormControl>
                 </Grid>
-                <Grid item xs={12}>
-                  <TextField
-                    fullWidth
-                    label="製品名"
-                    value={editingInventory.productName}
-                    onChange={(e) => setEditingInventory(prev => prev ? { ...prev, productName: e.target.value } : null)}
-                    InputProps={{ readOnly: true }}
-                    helperText="製品選択で自動入力されます"
-                  />
-                </Grid>
+                
                 <Grid item xs={6}>
                   <TextField
                     fullWidth
@@ -659,20 +937,13 @@ const StoreEditDialog: React.FC<StoreEditDialogProps> = ({
                 <Grid item xs={6}>
                   <TextField
                     fullWidth
-                    label="単位"
-                    value={editingInventory.unit}
-                    onChange={(e) => setEditingInventory(prev => prev ? { ...prev, unit: e.target.value } : null)}
-                  />
-                </Grid>
-                <Grid item xs={6}>
-                  <TextField
-                    fullWidth
                     label="最小在庫"
                     type="number"
                     value={editingInventory.minStock}
                     onChange={(e) => setEditingInventory(prev => prev ? { ...prev, minStock: parseInt(e.target.value) } : null)}
                   />
                 </Grid>
+                
                 <Grid item xs={6}>
                   <TextField
                     fullWidth
@@ -682,7 +953,7 @@ const StoreEditDialog: React.FC<StoreEditDialogProps> = ({
                     onChange={(e) => setEditingInventory(prev => prev ? { ...prev, maxStock: parseInt(e.target.value) } : null)}
                   />
                 </Grid>
-                <Grid item xs={12}>
+                <Grid item xs={6}>
                   <TextField
                     fullWidth
                     label="発注点"
@@ -695,7 +966,7 @@ const StoreEditDialog: React.FC<StoreEditDialogProps> = ({
             </DialogContent>
             <DialogActions>
               <Button onClick={() => setEditingInventory(null)}>キャンセル</Button>
-              <Button onClick={handleSaveInventory} variant="contained" startIcon={<SaveIcon />}>
+              <Button onClick={handleSaveInventory} variant="contained">
                 保存
               </Button>
             </DialogActions>
@@ -704,13 +975,13 @@ const StoreEditDialog: React.FC<StoreEditDialogProps> = ({
       </DialogContent>
 
       <DialogActions>
-                 <Button onClick={onClose}>{t('common.cancel')}</Button>
-         <Button onClick={handleSave} variant="contained" startIcon={<SaveIcon />}>
-           {t('common.save')}
-         </Button>
+        <Button onClick={onClose}>キャンセル</Button>
+        <Button onClick={handleSave} variant="contained">
+          保存
+        </Button>
       </DialogActions>
     </Dialog>
   );
 };
 
-export default StoreEditDialog; 
+export default StoreEditDialog;

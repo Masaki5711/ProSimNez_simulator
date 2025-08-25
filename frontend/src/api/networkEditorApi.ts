@@ -34,10 +34,9 @@ export const convertToBackendFormat = (networkData: NetworkData) => {
       outputs: [], // エッジから計算
       cycleTime: node.data.cycleTime,
       setupTime: node.data.setupTime,
-      inputBufferCapacity: node.data.inputBufferCapacity,
-      outputBufferCapacity: node.data.outputBufferCapacity,
-      defectRate: node.data.defectRate,
-      operatingCost: node.data.operatingCost,
+      // バッファ容量は材料設定で部品・製品ごとに管理
+      qualitySettings: node.data.qualitySettings,
+      schedulingSettings: node.data.schedulingSettings,
     };
   });
   
@@ -49,9 +48,9 @@ export const convertToBackendFormat = (networkData: NetworkData) => {
       target: edge.target,
       transportTime: edge.data.transportTime,
       transportLotSize: edge.data.transportLotSize,
-      transportCost: edge.data.transportCost,
       distance: edge.data.distance,
-      transportType: edge.data.transportType,
+      transportSettings: edge.data.transportSettings,
+      transportMethods: edge.data.transportMethods,
     };
     
     // 入出力情報を更新
@@ -86,11 +85,22 @@ export const convertFromBackendFormat = (backendData: any): NetworkData => {
           setupTime: process.setupTime || 300,
           equipmentCount: process.equipmentCount || 1,
           operatorCount: process.operatorCount || 1,
-          inputBufferCapacity: process.inputBufferCapacity || 50,
-          outputBufferCapacity: process.outputBufferCapacity || 50,
-          defectRate: process.defectRate || 2,
-          reworkRate: process.reworkRate || 1,
-          operatingCost: process.operatingCost || 100,
+          // バッファ容量は材料設定で部品・製品ごとに管理
+          qualitySettings: process.qualitySettings || {
+            defectRate: process.defectRate || 2,
+            reworkRate: process.reworkRate || 1,
+            scrapRate: 0.5,
+            inspectionTime: 30,
+            inspectionCapacity: 60,
+          },
+          schedulingSettings: process.schedulingSettings || {
+            mode: 'push',
+            batchSize: 10,
+            leadTime: 300,
+            kanbanCards: 5,
+            pushThreshold: 80,
+            pullSignal: 'inventory_level',
+          },
           inputs: process.inputs || [],
           outputs: process.outputs || [],
         },
@@ -109,9 +119,15 @@ export const convertFromBackendFormat = (backendData: any): NetworkData => {
         data: {
           transportTime: connection.transportTime || 30,
           transportLotSize: connection.transportLotSize || 10,
-          transportCost: connection.transportCost || 50,
           distance: connection.distance || 10,
           transportType: connection.transportType || 'conveyor',
+          transportSettings: connection.transportSettings || {
+            defaultMethod: '',
+            enableCapacityControl: true,
+            enableRouting: false,
+            congestionHandling: 'queue',
+          },
+          transportMethods: connection.transportMethods || [],
         },
       });
     });

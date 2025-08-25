@@ -22,7 +22,7 @@ from app.core.process_simulator import DetailedProcessSimulator, ProcessingJob
 from app.core.material_flow_manager import MaterialFlowManager
 from app.core.transport_simulator import TransportSimulator
 from app.core.quality_manager import QualityManager, InspectionType
-from app.core.scheduler import ProductionScheduler, ProductionOrder
+from app.core.scheduler import ProductionScheduler, ProductionOrder, SchedulingStrategy
 from app.websocket.realtime_manager import RealtimeDataManager
 
 logger = logging.getLogger(__name__)
@@ -44,6 +44,13 @@ class SimulationConfig:
     enable_transport: bool = True
     enable_quality: bool = True
     enable_scheduling: bool = True
+    
+    # 新しい機能の有効化
+    enable_store_schedule_control: bool = True  # ストアスケジュール制御
+    enable_process_quality_control: bool = True  # 工程品質制御
+    enable_transport_capacity_control: bool = True  # 搬送能力制御
+    enable_branch_output: bool = True  # 分岐出力制御
+    enable_push_pull_kanban: bool = True  # プッシュ/プル/かんばん制御
     
     # 出力設定
     save_detailed_logs: bool = True
@@ -223,58 +230,89 @@ class MasterSimulator:
             "delivery": DeliveryPerformanceCollector()
         }
         
-    async def start_simulation(self) -> str:
-        """シミュレーションを開始"""
-        if not self.config or not self.env:
-            raise ValueError("シミュレーションが設定されていません")
-            
-        if self.is_running:
-            raise ValueError("シミュレーションは既に実行中です")
-            
-        self.is_running = True
-        self.is_paused = False
-        
-        # 結果オブジェクトを初期化
-        self.current_results = SimulationResults(
-            simulation_id=self.config.simulation_id,
-            start_time=datetime.now(),
-            end_time=datetime.now(),
-            duration_hours=self.config.duration_hours
-        )
-        
+    async def start_simulation(self, config: SimulationConfig) -> bool:
+        """シミュレーション開始"""
         try:
-            # サブシステムのシミュレーションプロセスを開始
-            simulation_processes = []
+            logger.info(f"シミュレーション開始: {config.name}")
             
-            # 詳細工程シミュレータを開始
-            for process_simulator in self.process_simulators.values():
-                process = await process_simulator.run_simulation()
-                simulation_processes.append(process)
-                
-            # メインシミュレーションループを開始
-            main_process = self.env.process(self._main_simulation_loop())
-            simulation_processes.append(main_process)
+            # 設定を保存
+            self.config = config
             
-            # KPI監視プロセスを開始
-            kpi_process = self.env.process(self._kpi_monitoring_loop())
-            simulation_processes.append(kpi_process)
+            # SimPy環境を初期化
+            self.env = simpy.Environment()
             
-            # シミュレーション実行
-            duration_seconds = self.config.duration_hours * 3600
-            await asyncio.to_thread(self.env.run, until=duration_seconds)
+            # リアルタイム管理を初期化
+            if config.real_time_monitoring:
+                self.realtime_manager = RealtimeDataManager()
+                await self.realtime_manager.initialize()
             
-            # 結果を集計
-            await self._collect_final_results()
+            # 生産計画の読み込みとバックワード・スケジューリング
+            if config.enable_scheduling:
+                await self._load_production_plans_and_schedule()
+            
+            # 各サブシステムを初期化
+            await self._initialize_subsystems()
+            
+            # シミュレーション開始
+            self.is_running = True
+            self.is_paused = False
+            
+            # メインループを開始
+            await self._run_main_loop()
+            
+            return True
             
         except Exception as e:
-            self.is_running = False
-            raise e
-        finally:
-            self.is_running = False
-            self.current_results.end_time = datetime.now()
+            logger.error(f"シミュレーション開始エラー: {e}")
+            return False
+    
+    async def _load_production_plans_and_schedule(self):
+        """生産計画の読み込みとバックワード・スケジューリング"""
+        try:
+            logger.info("生産計画の読み込みとバックワード・スケジューリングを開始")
             
-        return self.config.simulation_id
-        
+            # 完成品ストアから生産計画を読み込み
+            production_plans = self.factory.get_all_production_plans()
+            
+            if not production_plans:
+                logger.warning("生産計画が見つかりません")
+                return
+            
+            logger.info(f"生産計画数: {len(production_plans)}")
+            
+            # 各計画の詳細をログ出力
+            for plan in production_plans:
+                logger.info(f"計画: {plan.id}, 製品: {plan.product_id}, 数量: {plan.quantity}, 納期: {plan.due_date}")
+            
+            # バックワード・スケジューリングを実行
+            scheduler = ProductionScheduler(
+                factory=self.factory,
+                event_manager=self.event_manager,
+                resource_manager=self.resource_manager
+            )
+            
+            # バックワード・スケジューリング戦略を設定
+            scheduler.set_scheduling_strategy(SchedulingStrategy.BACKWARD)
+            
+            # スケジューリング実行
+            await scheduler.schedule()
+            
+            logger.info("バックワード・スケジューリング完了")
+            
+            # スケジュール結果をログ出力
+            scheduled_operations = scheduler.get_scheduled_operations()
+            logger.info(f"スケジュール済み作業数: {len(scheduled_operations)}")
+            
+            # 各工程のスケジュールを確認
+            for process_id, operations in scheduler.resource_schedules.items():
+                logger.info(f"工程 {process_id}: {len(operations)} 件の作業がスケジュール済み")
+                for op in operations:
+                    logger.info(f"  - {op.operation_id}: {op.scheduled_start} -> {op.scheduled_end}")
+            
+        except Exception as e:
+            logger.error(f"生産計画読み込み・スケジューリングエラー: {e}")
+            raise
+    
     def _main_simulation_loop(self):
         """メインシミュレーションループ"""
         while True:

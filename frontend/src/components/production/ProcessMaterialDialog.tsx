@@ -42,7 +42,6 @@ import {
   Inventory as MaterialIcon,
   Factory as ProcessIcon,
   Schedule as TimingIcon,
-  LocalShipping as SupplyIcon,
 } from '@mui/icons-material';
 import {
   Product,
@@ -50,6 +49,7 @@ import {
   MaterialInput,
   ProductOutput,
 } from '../../types/productionTypes';
+import { BufferUtils } from '../../utils/bufferUtils';
 
 interface ProcessMaterialDialogProps {
   open: boolean;
@@ -83,15 +83,19 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
     requiredQuantity: 1,
     unit: '個',
     timing: 'start' as const,
-    supplyMethod: 'manual' as const,
     storageLocation: '',
     isDefective: false,
     qualityGrade: 'A',
-    initialBufferSettings: {
-      enabled: false,
+    schedulingMode: 'push' as const,
+    supplyMethod: 'manual' as const,
+    batchSize: 1,
+    minBatchSize: 1,
+    maxBatchSize: 100,
+    bufferSettings: {
+      enabled: true as const, // 常に有効
       initialStock: 0,
       safetyStock: 0,
-      maxCapacity: 100,
+      maxLots: 5, // デフォルト5ロット
       bufferType: 'input' as const,
       location: '',
       notes: ''
@@ -104,6 +108,16 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
     unit: '個',
     qualityLevel: 'standard',
     setupTime: 0,
+    cycleTime: 60,
+    bufferSettings: {
+      enabled: true as const, // 常に有効
+      initialStock: 0,
+      safetyStock: 0,
+      maxLots: 3, // デフォルト3ロット
+      bufferType: 'output' as const,
+      location: '',
+      notes: ''
+    }
   });
   const [editingMaterialIndex, setEditingMaterialIndex] = useState<number | null>(null);
   const [editingOutputIndex, setEditingOutputIndex] = useState<number | null>(null);
@@ -248,15 +262,15 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
       const updatedInputMaterials = editingProcess.inputMaterials.map(material => {
         const updatedMaterial = {
           ...material,
-          initialBufferSettings: {
-            ...material.initialBufferSettings,
-            enabled: true,
+          bufferSettings: {
+            ...material.bufferSettings,
+            enabled: true, // 常に有効
             bufferType: 'input' as const,
-            initialStock: material.initialBufferSettings?.initialStock || 0,
-            safetyStock: material.initialBufferSettings?.safetyStock || 0,
-            maxCapacity: material.initialBufferSettings?.maxCapacity || 100,
-            location: material.initialBufferSettings?.location || '',
-            notes: material.initialBufferSettings?.notes || ''
+            initialStock: material.bufferSettings?.initialStock || 0,
+            safetyStock: material.bufferSettings?.safetyStock || 0,
+            maxLots: material.bufferSettings?.maxLots || 5,
+            location: material.bufferSettings?.location || '',
+            notes: material.bufferSettings?.notes || ''
           }
         };
         return updatedMaterial;
@@ -330,7 +344,7 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
       // ただし、既に設定されている場合は上書きしない
       if (enableHeadStorageNode === false) {
         const existingSetting = processData.inputMaterials?.some(material => 
-          material.initialBufferSettings?.enabled && material.initialBufferSettings?.bufferType === 'input'
+          material.bufferSettings?.enabled && material.bufferSettings?.bufferType === 'input'
         );
         setEnableHeadStorageNode(existingSetting || false);
         console.log('🔍 先頭保管ノード設定読み込み:', {
@@ -359,7 +373,6 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
       requiredQuantity: newMaterial.requiredQuantity,
       unit: newMaterial.unit,
       timing: newMaterial.timing,
-      supplyMethod: newMaterial.supplyMethod,
       storageLocation: newMaterial.storageLocation,
       isDefective: newMaterial.isDefective,
       qualityGrade: newMaterial.qualityGrade,
@@ -406,12 +419,12 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
         measurementMethod: newMaterial.qualitySpec?.measurementMethod || '',
       },
       storageLocation: newMaterial.storageLocation || '',
-      supplyMethod: newMaterial.supplyMethod || 'manual',
       isDefective: newMaterial.isDefective || false,
       qualityGrade: newMaterial.qualityGrade || 'A',
       originalProductId: newMaterial.originalProductId,
       // デフォルトのスケジューリング設定
       schedulingMode: 'push',
+      supplyMethod: 'manual',
       batchSize: 1,
       minBatchSize: 1,
       maxBatchSize: 100,
@@ -424,15 +437,15 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
         supplierLeadTime: 3,
         kanbanType: 'production'
       },
-      // 先頭保管ノードが有効な場合は初期バッファ設定を有効化
-      initialBufferSettings: {
-        enabled: isHeadStorageNode() && enableHeadStorageNode,
-        initialStock: newMaterial.initialBufferSettings?.initialStock || 0,
-        safetyStock: newMaterial.initialBufferSettings?.safetyStock || 0,
-        maxCapacity: newMaterial.initialBufferSettings?.maxCapacity || 100,
+      // バッファ設定（常に有効）
+      bufferSettings: {
+        enabled: true, // 常に有効
+        initialStock: newMaterial.bufferSettings?.initialStock || 0,
+        safetyStock: newMaterial.bufferSettings?.safetyStock || 0,
+        maxLots: newMaterial.bufferSettings?.maxLots || 5,
         bufferType: 'input',
-        location: newMaterial.initialBufferSettings?.location || '',
-        notes: newMaterial.initialBufferSettings?.notes || ''
+        location: newMaterial.bufferSettings?.location || '',
+        notes: newMaterial.bufferSettings?.notes || ''
       }
     };
 
@@ -447,15 +460,19 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
       requiredQuantity: 1,
       unit: '個',
       timing: 'start' as const,
-      supplyMethod: 'manual' as const,
       storageLocation: '',
       isDefective: false,
       qualityGrade: 'A',
-      initialBufferSettings: {
-        enabled: isHeadStorageNode() && enableHeadStorageNode,
+      schedulingMode: 'push' as const,
+      supplyMethod: 'manual' as const,
+      batchSize: 1,
+      minBatchSize: 1,
+      maxBatchSize: 100,
+      bufferSettings: {
+        enabled: true as const, // 常に有効
         initialStock: 0,
         safetyStock: 0,
-        maxCapacity: 100,
+        maxLots: 5,
         bufferType: 'input' as const,
         location: '',
         notes: ''
@@ -491,27 +508,71 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
       unit: newOutput.unit || '個',
       qualityLevel: newOutput.qualityLevel || 'standard',
       setupTime: newOutput.setupTime || 0,
+      cycleTime: newOutput.cycleTime || 60,
       packagingSpec: newOutput.packagingSpec,
+      bufferSettings: newOutput.bufferSettings || {
+        enabled: true as const,
+        initialStock: 0,
+        safetyStock: 0,
+        maxLots: 5,
+        bufferType: 'output' as const,
+        location: '',
+        notes: ''
+      },
     };
 
     console.log('🔍 作成された出力製品オブジェクト:', output);
 
+    let updatedOutputs;
+    if (editingOutputIndex !== null) {
+      // 編集モード：既存の項目を更新
+      updatedOutputs = [...editingProcess.outputProducts];
+      updatedOutputs[editingOutputIndex] = output;
+      console.log('🔍 出力製品更新:', { index: editingOutputIndex, output });
+    } else {
+      // 新規追加モード
+      updatedOutputs = [...editingProcess.outputProducts, output];
+      console.log('🔍 出力製品追加:', output);
+    }
+
     setEditingProcess({
       ...editingProcess,
-      outputProducts: [...editingProcess.outputProducts, output],
+      outputProducts: updatedOutputs,
     });
 
+    // フォームをリセット
+    handleCancelOutput();
+    
+    console.log('✅ 出力製品追加/更新完了');
+  };
+
+  // 出力製品の編集キャンセル
+  const handleCancelOutput = () => {
+    console.log('🔍 出力製品編集キャンセル');
+    
+    // 編集モードを解除
+    setEditingOutputIndex(null);
+    
+    // フォームをリセット
     const resetOutput = {
       outputQuantity: 1,
       unit: '個',
       qualityLevel: 'standard',
       setupTime: 0,
+      cycleTime: 60,
+      bufferSettings: {
+        enabled: true as const, // 常に有効
+        initialStock: 0,
+        safetyStock: 0,
+        maxLots: 5,
+        bufferType: 'output' as const,
+        location: '',
+        notes: ''
+      }
     };
-
-    console.log('🔍 出力製品追加後のリセットデータ:', resetOutput);
-    setNewOutput(resetOutput);
     
-    console.log('✅ 出力製品追加完了');
+    setNewOutput(resetOutput);
+    console.log('🔍 出力製品フォームリセット完了');
   };
 
   // 材料編集
@@ -524,19 +585,19 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
       requiredQuantity: material.requiredQuantity,
       unit: material.unit,
       timing: material.timing,
-      supplyMethod: material.supplyMethod,
       storageLocation: material.storageLocation,
       isDefective: material.isDefective,
       qualityGrade: material.qualityGrade,
       originalProductId: material.originalProductId,
       // スケジューリング設定も含める
       schedulingMode: material.schedulingMode,
-      batchSize: material.batchSize,
-      minBatchSize: material.minBatchSize,
-      maxBatchSize: material.maxBatchSize,
+      supplyMethod: material.supplyMethod || 'manual',
+      batchSize: material.batchSize || 1,
+      minBatchSize: material.minBatchSize || 1,
+      maxBatchSize: material.maxBatchSize || 100,
       kanbanSettings: material.kanbanSettings,
-      // 初期バッファー設定も含める
-      initialBufferSettings: material.initialBufferSettings,
+      // バッファー設定も含める
+      bufferSettings: material.bufferSettings,
     });
   };
 
@@ -554,12 +615,13 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
       originalProductId: newMaterial.originalProductId,
       // スケジューリング設定も含める
       schedulingMode: newMaterial.schedulingMode,
-      batchSize: newMaterial.batchSize,
-      minBatchSize: newMaterial.minBatchSize,
-      maxBatchSize: newMaterial.maxBatchSize,
+      supplyMethod: 'manual',
+      batchSize: 1,
+      minBatchSize: 1,
+      maxBatchSize: 100,
       kanbanSettings: newMaterial.kanbanSettings,
-      // 初期バッファー設定も含める
-      initialBufferSettings: newMaterial.initialBufferSettings,
+      // バッファー設定も含める
+      bufferSettings: newMaterial.bufferSettings,
     } as MaterialInput;
 
     setEditingProcess({
@@ -572,12 +634,12 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
       requiredQuantity: 1,
       unit: '個',
       timing: 'start' as const,
-      supplyMethod: 'manual' as const,
       storageLocation: '',
       isDefective: false,
       qualityGrade: 'A',
       // デフォルトのスケジューリング設定
       schedulingMode: 'push' as const,
+      supplyMethod: 'manual' as const,
       batchSize: 1,
       minBatchSize: 1,
       maxBatchSize: 100,
@@ -604,6 +666,33 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
   };
 
   // 出力製品削除
+  // 出力製品編集
+  const handleEditOutput = (index: number) => {
+    if (!editingProcess || !editingProcess.outputProducts[index]) return;
+    
+    const outputToEdit = editingProcess.outputProducts[index];
+    
+    console.log('🔍 出力製品編集開始:', { index, outputToEdit });
+    
+    // 編集対象のデータをnewOutputにセット
+    setNewOutput({
+      productId: outputToEdit.productId,
+      productName: outputToEdit.productName,
+      outputQuantity: outputToEdit.outputQuantity,
+      unit: outputToEdit.unit,
+      qualityLevel: outputToEdit.qualityLevel,
+      setupTime: outputToEdit.setupTime,
+      cycleTime: outputToEdit.cycleTime,
+      packagingSpec: outputToEdit.packagingSpec,
+      bufferSettings: { ...outputToEdit.bufferSettings }
+    });
+    
+    // 編集モードに設定
+    setEditingOutputIndex(index);
+    
+    console.log('🔍 編集モード設定完了:', { editingIndex: index, newOutput });
+  };
+  
   const handleDeleteOutput = (index: number) => {
     if (!editingProcess) return;
 
@@ -626,20 +715,29 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
         // 既存の投入材料の初期バッファ設定を更新
         updatedProcess.inputMaterials = updatedProcess.inputMaterials.map(material => ({
           ...material,
-          initialBufferSettings: {
-            ...material.initialBufferSettings,
-            enabled: true, // 先頭保管ノードが有効な場合は強制的に有効化
+          bufferSettings: {
+            ...material.bufferSettings,
+            enabled: true, // 常に有効
             bufferType: 'input' as const,
-            initialStock: material.initialBufferSettings?.initialStock || 0,
-            safetyStock: material.initialBufferSettings?.safetyStock || 0,
-            maxCapacity: material.initialBufferSettings?.maxCapacity || 100,
-            location: material.initialBufferSettings?.location || '',
-            notes: material.initialBufferSettings?.notes || ''
+            initialStock: material.bufferSettings?.initialStock || 0,
+            safetyStock: material.bufferSettings?.safetyStock || 0,
+            maxLots: material.bufferSettings?.maxLots || 5,
+            location: material.bufferSettings?.location || '',
+            notes: material.bufferSettings?.notes || ''
           }
         })) as any;
         
         console.log('✅ 先頭保管ノード設定反映完了:', updatedProcess.inputMaterials);
       }
+      
+      console.log('🔍 ProcessMaterialDialog handleSave - 保存前のデータ:', {
+        processId: updatedProcess.id,
+        processLabel: updatedProcess.label,
+        inputMaterials: updatedProcess.inputMaterials,
+        outputProducts: updatedProcess.outputProducts,
+        inputMaterialsCount: updatedProcess.inputMaterials?.length || 0,
+        outputProductsCount: updatedProcess.outputProducts?.length || 0
+      });
       
       onSave(updatedProcess);
     onClose();
@@ -656,15 +754,6 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
     }
   };
 
-  // 供給方法のアイコン
-  const getSupplyIcon = (method: string) => {
-    switch (method) {
-      case 'manual': return <SupplyIcon color="primary" />;
-      case 'automated': return <SupplyIcon color="success" />;
-      case 'kanban': return <SupplyIcon color="info" />;
-      default: return <SupplyIcon />;
-    }
-  };
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth>
@@ -897,7 +986,6 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                         ...(precedingProduct && {
                           originalProductId: precedingProduct.id,
                           storageLocation: `前工程: ${precedingProduct.processName}`,
-                          supplyMethod: 'kanban' as any
                         })
                       };
                       
@@ -1201,17 +1289,6 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                   </Select>
                 </FormControl>
 
-                <FormControl fullWidth>
-                  <InputLabel>供給方法</InputLabel>
-                  <Select
-                            value={newMaterial.supplyMethod || 'manual'}
-                            onChange={(e) => setNewMaterial({ ...newMaterial, supplyMethod: e.target.value as any })}
-                  >
-                    <MenuItem value="manual">手動供給</MenuItem>
-                    <MenuItem value="automated">自動供給</MenuItem>
-                    <MenuItem value="kanban">かんばん</MenuItem>
-                  </Select>
-                </FormControl>
                       </Box>
 
                 <TextField
@@ -1270,43 +1347,34 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                       {/* 部品ごとの初期バッファー設定 */}
                       <Box sx={{ mt: 2, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
                         <Typography variant="subtitle2" gutterBottom>
-                          🗂️ 初期バッファー設定
+                          🗂️ バッファー設定（ロットサイズベース）
                         </Typography>
                         
-                        <FormControlLabel
-                          control={
-                            <Switch
-                              checked={newMaterial.initialBufferSettings?.enabled || false}
-                              onChange={(e) => setNewMaterial({
-                                ...newMaterial,
-                                initialBufferSettings: {
-                                  ...newMaterial.initialBufferSettings,
-                                  enabled: e.target.checked,
-                                  initialStock: 0,
-                                  safetyStock: 0,
-                                  maxCapacity: 100,
-                                  bufferType: 'input',
-                                  location: '',
-                                  notes: ''
-                                }
-                              })}
-                            />
-                          }
-                          label="初期バッファーを有効化"
-                        />
+                        <Alert severity="info" sx={{ mb: 2 }}>
+                          <Typography variant="body2">
+                            バッファは常に有効で、設定はロットサイズの倍数で管理されます。
+                            部品のロットサイズ: {BufferUtils.getLotSize(newMaterial.materialId || '', products)}
+                          </Typography>
+                        </Alert>
 
-                        {newMaterial.initialBufferSettings?.enabled && (
+                        {/* バッファ設定は常に表示 */}
+                        {(
                           <>
                             <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mt: 2 }}>
                               <FormControl fullWidth>
                                 <InputLabel>バッファータイプ</InputLabel>
                                 <Select
-                                  value={newMaterial.initialBufferSettings.bufferType || 'input'}
+                                  value={newMaterial.bufferSettings?.bufferType || 'input'}
                                   onChange={(e) => setNewMaterial({
                                     ...newMaterial,
-                                    initialBufferSettings: {
-                                      ...newMaterial.initialBufferSettings!,
-                                      bufferType: e.target.value as 'input' | 'output' | 'both'
+                                    bufferSettings: {
+                                      enabled: true as const,
+                                      initialStock: newMaterial.bufferSettings?.initialStock || 0,
+                                      safetyStock: newMaterial.bufferSettings?.safetyStock || 0,
+                                      maxLots: newMaterial.bufferSettings?.maxLots || 5,
+                                      bufferType: e.target.value as 'input' | 'output' | 'both',
+                                      location: newMaterial.bufferSettings?.location || '',
+                                      notes: newMaterial.bufferSettings?.notes || ''
                                     }
                                   })}
                                 >
@@ -1317,57 +1385,99 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                               </FormControl>
 
                               <TextField
-                                label="最大容量"
+                                label="最大ロット数"
                                 type="number"
-                                value={newMaterial.initialBufferSettings.maxCapacity || 100}
-                                onChange={(e) => setNewMaterial({
-                                  ...newMaterial,
-                                  initialBufferSettings: {
-                                    ...newMaterial.initialBufferSettings!,
-                                    maxCapacity: Number(e.target.value)
-                                  }
-                                })}
+                                value={newMaterial.bufferSettings?.maxLots || 5}
+                                onChange={(e) => {
+                                  const maxLots = Math.max(1, Number(e.target.value));
+                                  setNewMaterial({
+                                    ...newMaterial,
+                                    bufferSettings: {
+                                      enabled: true as const,
+                                      initialStock: newMaterial.bufferSettings?.initialStock || 0,
+                                      safetyStock: newMaterial.bufferSettings?.safetyStock || 0,
+                                      maxLots,
+                                      bufferType: newMaterial.bufferSettings?.bufferType || 'input',
+                                      location: newMaterial.bufferSettings?.location || '',
+                                      notes: newMaterial.bufferSettings?.notes || ''
+                                    }
+                                  });
+                                }}
                                 inputProps={{ min: 1 }}
+                                helperText={`最大容量: ${(newMaterial.bufferSettings?.maxLots || 5) * BufferUtils.getLotSize(newMaterial.materialId || '', products)}個`}
                               />
                             </Box>
 
                             <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mt: 2 }}>
-                              <TextField
-                                label="初期在庫数"
-                                type="number"
-                                value={newMaterial.initialBufferSettings.initialStock || 0}
-                                onChange={(e) => setNewMaterial({
-                                  ...newMaterial,
-                                  initialBufferSettings: {
-                                    ...newMaterial.initialBufferSettings!,
-                                    initialStock: Number(e.target.value)
-                                  }
-                                })}
-                                inputProps={{ min: 0 }}
-                              />
-                              <TextField
-                                label="安全在庫数"
-                                type="number"
-                                value={newMaterial.initialBufferSettings.safetyStock || 0}
-                                onChange={(e) => setNewMaterial({
-                                  ...newMaterial,
-                                  initialBufferSettings: {
-                                    ...newMaterial.initialBufferSettings!,
-                                    safetyStock: Number(e.target.value)
-                                  }
-                                })}
-                                inputProps={{ min: 0 }}
-                              />
+                              <FormControl fullWidth>
+                                <InputLabel>初期在庫数</InputLabel>
+                                <Select
+                                  value={newMaterial.bufferSettings?.initialStock || 0}
+                                  onChange={(e) => setNewMaterial({
+                                    ...newMaterial,
+                                    bufferSettings: {
+                                      enabled: true as const,
+                                      initialStock: Number(e.target.value),
+                                      safetyStock: newMaterial.bufferSettings?.safetyStock || 0,
+                                      maxLots: newMaterial.bufferSettings?.maxLots || 5,
+                                      bufferType: newMaterial.bufferSettings?.bufferType || 'input',
+                                      location: newMaterial.bufferSettings?.location || '',
+                                      notes: newMaterial.bufferSettings?.notes || ''
+                                    }
+                                  })}
+                                >
+                                  {BufferUtils.generateValidBufferSizes(
+                                    BufferUtils.getLotSize(newMaterial.materialId || '', products),
+                                    newMaterial.bufferSettings?.maxLots || 5
+                                  ).map((size) => (
+                                    <MenuItem key={size} value={size}>
+                                      {size === 0 ? '0個（空）' : `${size}個（${Math.floor(size / BufferUtils.getLotSize(newMaterial.materialId || '', products))}ロット）`}
+                                    </MenuItem>
+                                  ))}
+                                </Select>
+                              </FormControl>
+                              <FormControl fullWidth>
+                                <InputLabel>安全在庫数</InputLabel>
+                                <Select
+                                  value={newMaterial.bufferSettings?.safetyStock || 0}
+                                  onChange={(e) => setNewMaterial({
+                                    ...newMaterial,
+                                    bufferSettings: {
+                                      enabled: true as const,
+                                      initialStock: newMaterial.bufferSettings?.initialStock || 0,
+                                      safetyStock: Number(e.target.value),
+                                      maxLots: newMaterial.bufferSettings?.maxLots || 5,
+                                      bufferType: newMaterial.bufferSettings?.bufferType || 'input',
+                                      location: newMaterial.bufferSettings?.location || '',
+                                      notes: newMaterial.bufferSettings?.notes || ''
+                                    }
+                                  })}
+                                >
+                                  {BufferUtils.generateValidBufferSizes(
+                                    BufferUtils.getLotSize(newMaterial.materialId || '', products),
+                                    newMaterial.bufferSettings?.maxLots || 5
+                                  ).map((size) => (
+                                    <MenuItem key={size} value={size}>
+                                      {size === 0 ? '0個（なし）' : `${size}個（${Math.floor(size / BufferUtils.getLotSize(newMaterial.materialId || '', products))}ロット）`}
+                                    </MenuItem>
+                                  ))}
+                                </Select>
+                              </FormControl>
                             </Box>
 
                             <TextField
                               label="バッファー位置"
-                              value={newMaterial.initialBufferSettings.location || ''}
+                              value={newMaterial.bufferSettings?.location || ''}
                               onChange={(e) => setNewMaterial({
                                 ...newMaterial,
-                                initialBufferSettings: {
-                                  ...newMaterial.initialBufferSettings!,
-                                  location: e.target.value
+                                bufferSettings: {
+                                  enabled: true as const,
+                                  initialStock: newMaterial.bufferSettings?.initialStock || 0,
+                                  safetyStock: newMaterial.bufferSettings?.safetyStock || 0,
+                                  maxLots: newMaterial.bufferSettings?.maxLots || 5,
+                                  bufferType: newMaterial.bufferSettings?.bufferType || 'input',
+                                  location: e.target.value,
+                                  notes: newMaterial.bufferSettings?.notes || ''
                                 }
                               })}
                               fullWidth
@@ -1377,11 +1487,16 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
 
                             <TextField
                               label="備考"
-                              value={newMaterial.initialBufferSettings.notes || ''}
+                              value={newMaterial.bufferSettings?.notes || ''}
                               onChange={(e) => setNewMaterial({
                                 ...newMaterial,
-                                initialBufferSettings: {
-                                  ...newMaterial.initialBufferSettings!,
+                                bufferSettings: {
+                                  enabled: true as const,
+                                  initialStock: newMaterial.bufferSettings?.initialStock || 0,
+                                  safetyStock: newMaterial.bufferSettings?.safetyStock || 0,
+                                  maxLots: newMaterial.bufferSettings?.maxLots || 5,
+                                  bufferType: newMaterial.bufferSettings?.bufferType || 'input',
+                                  location: newMaterial.bufferSettings?.location || '',
                                   notes: e.target.value
                                 }
                               })}
@@ -1413,31 +1528,8 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                           </Select>
                         </FormControl>
 
-                        <TextField
-                          label="バッチサイズ"
-                          type="number"
-                          value={newMaterial.batchSize || 1}
-                          onChange={(e) => setNewMaterial({ ...newMaterial, batchSize: Number(e.target.value) })}
-                          inputProps={{ min: 1 }}
-                        />
                       </Box>
 
-                      <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
-                        <TextField
-                          label="最小バッチサイズ"
-                          type="number"
-                          value={newMaterial.minBatchSize || 1}
-                          onChange={(e) => setNewMaterial({ ...newMaterial, minBatchSize: Number(e.target.value) })}
-                          inputProps={{ min: 1 }}
-                        />
-                        <TextField
-                          label="最大バッチサイズ"
-                          type="number"
-                          value={newMaterial.maxBatchSize || 100}
-                          onChange={(e) => setNewMaterial({ ...newMaterial, maxBatchSize: Number(e.target.value) })}
-                          inputProps={{ min: 1 }}
-                        />
-                      </Box>
 
                       <FormControlLabel
                         control={
@@ -1510,8 +1602,12 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                                   requiredQuantity: 1,
                                   unit: '個',
                                   timing: 'start' as const,
-                                  supplyMethod: 'manual' as const,
                                   storageLocation: '',
+                                  schedulingMode: 'push' as const,
+                                  supplyMethod: 'manual' as const,
+                                  batchSize: 1,
+                                  minBatchSize: 1,
+                                  maxBatchSize: 100,
                                 });
                               }}
                   >
@@ -1545,7 +1641,6 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                           <TableCell>材料名</TableCell>
                           <TableCell align="right">数量</TableCell>
                           <TableCell>タイミング</TableCell>
-                          <TableCell>供給方法</TableCell>
                           <TableCell>品質・不良品</TableCell>
                           <TableCell>スケジューリング</TableCell>
                           <TableCell>初期バッファー</TableCell>
@@ -1586,16 +1681,6 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                                 </Box>
                               </TableCell>
                               <TableCell>
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                  {getSupplyIcon(material.supplyMethod)}
-                                  <Typography variant="caption">
-                                    {material.supplyMethod === 'manual' && '手動'}
-                                    {material.supplyMethod === 'automated' && '自動'}
-                                    {material.supplyMethod === 'kanban' && 'かんばん'}
-                                  </Typography>
-                                </Box>
-                              </TableCell>
-                              <TableCell>
                                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
                                   {material.isDefective ? (
                     <Chip
@@ -1626,9 +1711,6 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                                     {material.schedulingMode === 'pull' && 'プル型'}
                                     {material.schedulingMode === 'hybrid' && 'ハイブリッド'}
                                   </Typography>
-                                  <Typography variant="caption" color="textSecondary">
-                                    バッチ: {material.batchSize}
-                                  </Typography>
                                   {material.kanbanSettings?.enabled && (
                                     <Chip 
                                       label="かんばん" 
@@ -1641,24 +1723,27 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                               </TableCell>
                         <TableCell>
                                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                                  {material.initialBufferSettings?.enabled ? (
+                                  {material.bufferSettings?.enabled ? (
                                     <>
                                       <Chip 
-                                        label={`${material.initialBufferSettings.bufferType === 'input' ? '入力' : 
-                                               material.initialBufferSettings.bufferType === 'output' ? '出力' : '両方'}バッファー`}
+                                        label={`${material.bufferSettings.bufferType === 'input' ? '入力' : 
+                                               material.bufferSettings.bufferType === 'output' ? '出力' : '両方'}バッファー`}
                                         size="small" 
                                         color="primary" 
                                         variant="outlined"
                                       />
                                       <Typography variant="caption" color="textSecondary">
-                                        初期: {material.initialBufferSettings.initialStock}
+                                        初期: {material.bufferSettings.initialStock}個
                                       </Typography>
                                       <Typography variant="caption" color="textSecondary">
-                                        最大: {material.initialBufferSettings.maxCapacity}
+                                        最大: {material.bufferSettings.maxLots}ロット
                                       </Typography>
-                                      {material.initialBufferSettings.location && (
+                                      <Typography variant="caption" color="textSecondary">
+                                        容量: {(material.bufferSettings.maxLots || 5) * BufferUtils.getLotSize(material.materialId || '', products)}個
+                                      </Typography>
+                                      {material.bufferSettings.location && (
                                         <Typography variant="caption" color="textSecondary">
-                                          位置: {material.initialBufferSettings.location}
+                                          位置: {material.bufferSettings.location}
                                         </Typography>
                                       )}
                                     </>
@@ -1783,24 +1868,209 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                 />
                       </Box>
                       
+                      <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
+                <TextField
+                  label="サイクルタイム（秒）"
+                  type="number"
+                        value={newOutput.cycleTime || ''}
+                        onChange={(e) => setNewOutput({ ...newOutput, cycleTime: Number(e.target.value) })}
+                  inputProps={{ min: 1, step: 1 }}
+                        helperText="この製品の製造にかかる時間を設定してください"
+                      />
                 <TextField
                   label="段取り時間（分）"
                   type="number"
                         value={newOutput.setupTime || ''}
                         onChange={(e) => setNewOutput({ ...newOutput, setupTime: Number(e.target.value) })}
                   inputProps={{ min: 0, step: 1 }}
-                        helperText="この製品を製造する際の段取り時間を設定してください"
+                        helperText="この製品を製造する際の段取り時間"
+                      />
+                      </Box>
+                      
+                      {/* 出力バッファ設定 - 常に有効 */}
+                      <Alert severity="info" sx={{ mb: 2 }}>
+                        出力バッファは常に有効で、ロットサイズの倍数で設定されます
+                      </Alert>
+
+                      <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mt: 2 }}>
+                        <FormControl fullWidth>
+                          <InputLabel>バッファータイプ</InputLabel>
+                          <Select
+                            value={newOutput.bufferSettings?.bufferType || 'output'}
+                            onChange={(e) => {
+                              const currentLotSize = newOutput.productId ? BufferUtils.getLotSize(newOutput.productId, products) : 1;
+                              
+                              setNewOutput({
+                                ...newOutput,
+                                bufferSettings: {
+                                  enabled: true,
+                                  initialStock: 0,
+                                  safetyStock: 0,
+                                  maxLots: 5,
+                                  bufferType: e.target.value as 'output' | 'both',
+                                  location: newOutput.bufferSettings?.location || '',
+                                  notes: newOutput.bufferSettings?.notes || ''
+                                }
+                              });
+                            }}
+                          >
+                            <MenuItem value="output">出力のみ</MenuItem>
+                            <MenuItem value="both">入出力両用</MenuItem>
+                          </Select>
+                        </FormControl>
+                        
+                        <FormControl fullWidth>
+                          <InputLabel>最大ロット数</InputLabel>
+                          <Select
+                            value={newOutput.bufferSettings?.maxLots || 5}
+                            onChange={(e) => {
+                              const currentLotSize = newOutput.productId ? BufferUtils.getLotSize(newOutput.productId, products) : 1;
+                              
+                              setNewOutput({
+                                ...newOutput,
+                                bufferSettings: {
+                                  ...newOutput.bufferSettings,
+                                  enabled: true,
+                                  maxLots: Number(e.target.value),
+                                  bufferType: newOutput.bufferSettings?.bufferType || 'output',
+                                  initialStock: newOutput.bufferSettings?.initialStock || 0,
+                                  safetyStock: newOutput.bufferSettings?.safetyStock || 0,
+                                  location: newOutput.bufferSettings?.location || '',
+                                  notes: newOutput.bufferSettings?.notes || ''
+                                }
+                              });
+                            }}
+                          >
+                            {newOutput.productId && BufferUtils.generateValidBufferSizes(
+                              BufferUtils.getLotSize(newOutput.productId, products), 10
+                            ).map(lots => (
+                              <MenuItem key={lots} value={Math.floor(lots / BufferUtils.getLotSize(newOutput.productId!, products))}>
+                                {Math.floor(lots / BufferUtils.getLotSize(newOutput.productId!, products))}ロット ({lots}個)
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+                        
+                        <FormControl fullWidth>
+                          <InputLabel>初期在庫</InputLabel>
+                          <Select
+                            value={newOutput.bufferSettings?.initialStock || 0}
+                            onChange={(e) => setNewOutput({
+                              ...newOutput,
+                              bufferSettings: {
+                                ...newOutput.bufferSettings,
+                                enabled: true,
+                                initialStock: Number(e.target.value),
+                                safetyStock: newOutput.bufferSettings?.safetyStock || 0,
+                                maxLots: newOutput.bufferSettings?.maxLots || 5,
+                                bufferType: newOutput.bufferSettings?.bufferType || 'output',
+                                location: newOutput.bufferSettings?.location || '',
+                                notes: newOutput.bufferSettings?.notes || ''
+                              }
+                            })}
+                          >
+                            <MenuItem value={0}>0個（なし）</MenuItem>
+                            {newOutput.productId && BufferUtils.generateValidBufferSizes(
+                              BufferUtils.getLotSize(newOutput.productId, products), 
+                              newOutput.bufferSettings?.maxLots || 5
+                            ).map(size => (
+                              <MenuItem key={size} value={size}>
+                                {size}個 ({Math.floor(size / BufferUtils.getLotSize(newOutput.productId!, products))}ロット)
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+                        
+                        <FormControl fullWidth>
+                          <InputLabel>安全在庫</InputLabel>
+                          <Select
+                            value={newOutput.bufferSettings?.safetyStock || 0}
+                            onChange={(e) => setNewOutput({
+                              ...newOutput,
+                              bufferSettings: {
+                                ...newOutput.bufferSettings,
+                                enabled: true,
+                                safetyStock: Number(e.target.value),
+                                initialStock: newOutput.bufferSettings?.initialStock || 0,
+                                maxLots: newOutput.bufferSettings?.maxLots || 5,
+                                bufferType: newOutput.bufferSettings?.bufferType || 'output',
+                                location: newOutput.bufferSettings?.location || '',
+                                notes: newOutput.bufferSettings?.notes || ''
+                              }
+                            })}
+                          >
+                            <MenuItem value={0}>0個（なし）</MenuItem>
+                            {newOutput.productId && BufferUtils.generateValidBufferSizes(
+                              BufferUtils.getLotSize(newOutput.productId, products),
+                              Math.min(newOutput.bufferSettings?.maxLots || 5, 5)
+                            ).map(size => (
+                              <MenuItem key={size} value={size}>
+                                {size}個 ({Math.floor(size / BufferUtils.getLotSize(newOutput.productId!, products))}ロット)
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+                      </Box>
+                      
+                      <TextField
+                        label="バッファー位置"
+                        value={newOutput.bufferSettings?.location || ''}
+                        onChange={(e) => setNewOutput({
+                          ...newOutput,
+                          bufferSettings: {
+                            enabled: true,
+                            initialStock: newOutput.bufferSettings?.initialStock || 0,
+                            safetyStock: newOutput.bufferSettings?.safetyStock || 0,
+                            maxLots: newOutput.bufferSettings?.maxLots || 5,
+                            bufferType: newOutput.bufferSettings?.bufferType || 'output',
+                            location: e.target.value,
+                            notes: newOutput.bufferSettings?.notes || ''
+                          }
+                        })}
                         fullWidth
+                        sx={{ mt: 1 }}
+                      />
+                      
+                      <TextField
+                        label="備考"
+                        value={newOutput.bufferSettings?.notes || ''}
+                        onChange={(e) => setNewOutput({
+                          ...newOutput,
+                          bufferSettings: {
+                            enabled: true,
+                            initialStock: newOutput.bufferSettings?.initialStock || 0,
+                            safetyStock: newOutput.bufferSettings?.safetyStock || 0,
+                            maxLots: newOutput.bufferSettings?.maxLots || 5,
+                            bufferType: newOutput.bufferSettings?.bufferType || 'output',
+                            location: newOutput.bufferSettings?.location || '',
+                            notes: e.target.value
+                          }
+                        })}
+                        fullWidth
+                        multiline
+                        rows={2}
+                        sx={{ mt: 1 }}
                       />
 
-                  <Button
-                        startIcon={<AddIcon />}
-                    variant="contained"
-                        onClick={handleAddOutput}
-                        disabled={!newOutput.productId}
+                  <Box sx={{ display: 'flex', gap: 1 }}>
+                    <Button
+                      startIcon={editingOutputIndex !== null ? <SaveIcon /> : <AddIcon />}
+                      variant="contained"
+                      onClick={handleAddOutput}
+                      disabled={!newOutput.productId}
+                    >
+                      {editingOutputIndex !== null ? '更新' : '追加'}
+                    </Button>
+                    {editingOutputIndex !== null && (
+                      <Button
+                        startIcon={<CancelIcon />}
+                        variant="outlined"
+                        onClick={handleCancelOutput}
                       >
-                        追加
-                  </Button>
+                        キャンセル
+                      </Button>
+                    )}
+                  </Box>
                     </Box>
                   </AccordionDetails>
                 </Accordion>
@@ -1817,14 +2087,16 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                           <TableCell>製品名</TableCell>
                           <TableCell align="right">数量</TableCell>
                           <TableCell>品質レベル</TableCell>
+                          <TableCell align="right">サイクルタイム</TableCell>
                           <TableCell align="right">段取り時間</TableCell>
+                          <TableCell>バッファ設定</TableCell>
                           <TableCell align="center">アクション</TableCell>
                         </TableRow>
                       </TableHead>
                       <TableBody>
                         {editingProcess?.outputProducts.length === 0 ? (
                           <TableRow>
-                            <TableCell colSpan={5} align="center">
+                            <TableCell colSpan={7} align="center">
                               <Typography variant="body2" color="textSecondary">
                                 出力製品が設定されていません
                               </Typography>
@@ -1832,7 +2104,13 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                           </TableRow>
                         ) : (
                           editingProcess?.outputProducts.map((output, index) => (
-                            <TableRow key={index}>
+                            <TableRow 
+                              key={index}
+                              sx={{ 
+                                backgroundColor: editingOutputIndex === index ? 'primary.50' : 'transparent',
+                                '&:hover': { backgroundColor: editingOutputIndex === index ? 'primary.100' : 'grey.50' }
+                              }}
+                            >
                               <TableCell>
                                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                                   <ProcessIcon fontSize="small" />
@@ -1851,20 +2129,66 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                                   <TimingIcon fontSize="small" />
                                   <Typography variant="body2">
+                                    {output.cycleTime || 60}秒
+                                  </Typography>
+                                </Box>
+                              </TableCell>
+                              <TableCell align="right">
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                  <TimingIcon fontSize="small" />
+                                  <Typography variant="body2">
                                     {output.setupTime}分
                                   </Typography>
                                 </Box>
                               </TableCell>
+                              <TableCell>
+                                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                                  <Chip 
+                                    label={`${output.bufferSettings?.bufferType === 'output' ? '出力' : '両用'}バッファー`}
+                                    size="small" 
+                                    color="primary" 
+                                    variant="outlined"
+                                  />
+                                  <Typography variant="caption" color="textSecondary">
+                                    初期: {output.bufferSettings?.initialStock || 0}個
+                                  </Typography>
+                                  <Typography variant="caption" color="textSecondary">
+                                    安全: {output.bufferSettings?.safetyStock || 0}個
+                                  </Typography>
+                                  <Typography variant="caption" color="textSecondary">
+                                    最大: {output.bufferSettings?.maxLots || 5}ロット
+                                  </Typography>
+                                  <Typography variant="caption" color="textSecondary">
+                                    容量: {(output.bufferSettings?.maxLots || 5) * BufferUtils.getLotSize(output.productId || '', products)}個
+                                  </Typography>
+                                  {output.bufferSettings?.location && (
+                                    <Typography variant="caption" color="textSecondary">
+                                      位置: {output.bufferSettings.location}
+                                    </Typography>
+                                  )}
+                                </Box>
+                              </TableCell>
                               <TableCell align="center">
-                                <Tooltip title="削除">
-                                  <IconButton
-                                    size="small"
-                                    onClick={() => handleDeleteOutput(index)}
-                                    color="error"
-                                  >
-                                    <DeleteIcon fontSize="small" />
-                                  </IconButton>
-                                </Tooltip>
+                                <Box sx={{ display: 'flex', gap: 0.5 }}>
+                                  <Tooltip title="編集">
+                                    <IconButton
+                                      size="small"
+                                      onClick={() => handleEditOutput(index)}
+                                      color="primary"
+                                    >
+                                      <EditIcon fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                  <Tooltip title="削除">
+                                    <IconButton
+                                      size="small"
+                                      onClick={() => handleDeleteOutput(index)}
+                                      color="error"
+                                    >
+                                      <DeleteIcon fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                </Box>
                               </TableCell>
                             </TableRow>
                           ))

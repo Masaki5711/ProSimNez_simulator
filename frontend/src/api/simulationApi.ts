@@ -154,7 +154,7 @@ export const networkApi = {
 export const networkSimulationApi = {
   // サンプルネットワークデータの取得
   getSampleData: async () => {
-    const response = await fetch('/api/network-simulation/sample-data');
+    const response = await fetch('/api/simulation/network-simulation/sample-data');
     if (!response.ok) {
       throw new Error('サンプルデータの取得に失敗しました');
     }
@@ -163,7 +163,7 @@ export const networkSimulationApi = {
 
   // ネットワークデータの検証
   validateNetworkData: async (networkData: any) => {
-    const response = await fetch('/api/network-simulation/validate', {
+    const response = await fetch('/api/simulation/network-simulation/validate', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -184,7 +184,7 @@ export const networkSimulationApi = {
     enable_scheduling_control: boolean;
     enable_real_time_update: boolean;
   }) => {
-    const response = await fetch('/api/start-network-simulation', {
+    const response = await fetch('/api/simulation/start-network-simulation', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -199,7 +199,7 @@ export const networkSimulationApi = {
 
   // ネットワークシミュレーションの状態取得
   getNetworkSimulationStatus: async () => {
-    const response = await fetch('/api/network-simulation/status');
+    const response = await fetch('/api/simulation/network-simulation/status');
     if (!response.ok) {
       throw new Error('シミュレーション状態の取得に失敗しました');
     }
@@ -208,7 +208,7 @@ export const networkSimulationApi = {
 
   // ネットワークシミュレーションの停止
   stopNetworkSimulation: async () => {
-    const response = await fetch('/api/network-simulation/stop', {
+    const response = await fetch('/api/simulation/network-simulation/stop', {
       method: 'POST',
     });
     if (!response.ok) {
@@ -219,7 +219,7 @@ export const networkSimulationApi = {
 
   // ネットワークシミュレーション結果の取得
   getNetworkSimulationResults: async () => {
-    const response = await fetch('/api/network-simulation/results');
+    const response = await fetch('/api/simulation/network-simulation/results');
     if (!response.ok) {
       throw new Error('シミュレーション結果の取得に失敗しました');
     }

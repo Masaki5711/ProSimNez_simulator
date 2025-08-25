@@ -17,6 +17,11 @@ const RealtimeStats: React.FC = () => {
   const equipmentStatus = useSelector((state: RootState) => state.monitoring.equipmentStatus);
   const kpiData = useSelector((state: RootState) => state.monitoring.kpiData);
 
+  // デバッグ用：Redux storeの変更を監視（一部のみ）
+  React.useEffect(() => {
+    console.log('[RealtimeStats] 経過時間更新:', currentTime, '実行中:', isRunning);
+  }, [currentTime, isRunning]);
+
   const totalInventory = Object.values(inventoryData).reduce((sum, qty) => sum + qty, 0);
   const runningEquipment = Object.values(equipmentStatus).filter(status => status === 'running').length;
   const totalEquipment = Object.values(equipmentStatus).length;
@@ -34,7 +39,15 @@ const RealtimeStats: React.FC = () => {
               シミュレーション: {isRunning ? (isPaused ? '一時停止' : '実行中') : '停止'}
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              経過時間: {Math.floor(currentTime / 60)}分{currentTime % 60}秒
+              経過時間: {(() => {
+                // 異常値チェック（24時間を超える場合は0分0秒を表示）
+                const maxTime = 24 * 60 * 60; // 24時間（秒）
+                if (currentTime > maxTime || currentTime < 0 || isNaN(currentTime)) {
+                  console.warn('異常な経過時間を検出:', currentTime);
+                  return '0分0秒';
+                }
+                return `${Math.floor(currentTime / 60)}分${currentTime % 60}秒`;
+              })()}
             </Typography>
             <Typography variant="body2" color="text.secondary">
               実行速度: {speed}x

@@ -14,7 +14,7 @@ import uuid
 
 from app.models.product import Product, Lot
 from app.models.process import Process
-from app.models.factory import Factory
+from app.models.factory import Factory, ProductionPlan, FinishedProductStore, Connection
 from app.models.event import SimulationEvent
 from app.core.event_manager import EventManager, EventPriority
 from app.core.process_simulator import ProcessingJob
@@ -28,6 +28,7 @@ class SchedulingStrategy(Enum):
     TOC = "toc"             # 制約理論
     LEAN = "lean"           # リーンプロダクション
     HYBRID = "hybrid"       # ハイブリッド
+    BACKWARD = "backward"   # バックワード・スケジューリング
 
 class PriorityRule(Enum):
     """優先度ルール"""
@@ -65,6 +66,24 @@ class ProductionOrder:
     actual_start: Optional[datetime] = None
     actual_end: Optional[datetime] = None
     status: str = "pending"  # "pending", "scheduled", "released", "in_progress", "completed"
+
+@dataclass
+class BackwardSchedulingRequest:
+    """バックワード・スケジューリング要求"""
+    request_id: str
+    target_process_id: str
+    required_product_id: str
+    required_quantity: int
+    required_delivery_time: datetime
+    requesting_process_id: Optional[str] = None  # 要求元工程（Noneの場合は完成品ストア）
+    priority: int = 1
+    created_at: datetime = field(default_factory=datetime.now)
+    
+    # スケジューリング結果
+    scheduled_start: Optional[datetime] = None
+    scheduled_end: Optional[datetime] = None
+    transport_start: Optional[datetime] = None
+    transport_end: Optional[datetime] = None
 
 @dataclass
 class SchedulingConstraint:
@@ -243,6 +262,8 @@ class ProductionScheduler:
             await self._toc_scheduling()
         elif self.scheduling_strategy == SchedulingStrategy.LEAN:
             await self._lean_scheduling()
+        elif self.scheduling_strategy == SchedulingStrategy.BACKWARD:
+            await self._backward_scheduling()
         else:  # HYBRID
             await self._hybrid_scheduling()
             
@@ -368,6 +389,166 @@ class ProductionScheduler:
         # ムダの排除
         await self._eliminate_waste_in_schedule()
         
+    async def _backward_scheduling(self):
+        """バックワード・スケジューリング"""
+        # 完成品ストアから開始し、上流工程に逆方向に要求を伝播させる
+        
+        # 全生産計画を取得（納期順）
+        all_plans = self.factory.get_all_production_plans()
+        if not all_plans:
+            await self._emit_event("scheduling_error", {
+                "error": "No production plans found",
+                "strategy": "backward"
+            })
+            return
+        
+        # グローバルイベントキューを構築（納期順）
+        global_event_queue = []
+        for plan in all_plans:
+            if plan.status == "pending":
+                # 完成品ストアへの納品完了時刻を設定
+                delivery_completion_time = plan.due_date
+                
+                # 完成品ストアの処理時間を考慮
+                store_process_id = None
+                for store in self.factory.finished_product_stores.values():
+                    if store.connected_process_id:
+                        store_process_id = store.connected_process_id
+                        break
+                
+                if store_process_id and store_process_id in self.factory.processes:
+                    store_process = self.factory.processes[store_process_id]
+                    # 完成品ストアの処理開始時刻を計算
+                    store_start_time = delivery_completion_time - timedelta(seconds=store_process.cycle_time)
+                    
+                    # イベントキューに追加
+                    global_event_queue.append({
+                        'type': 'delivery_completion',
+                        'plan_id': plan.id,
+                        'product_id': plan.product_id,
+                        'quantity': plan.quantity,
+                        'due_date': plan.due_date,
+                        'priority': plan.priority,
+                        'completion_time': delivery_completion_time,
+                        'store_start_time': store_start_time,
+                        'store_process_id': store_process_id
+                    })
+        
+        # 納期順にソート
+        global_event_queue.sort(key=lambda x: x['due_date'])
+        
+        # 各計画に対してバックワード・スケジューリングを実行
+        for event in global_event_queue:
+            await self._schedule_backward_from_delivery(event)
+    
+    async def _schedule_backward_from_delivery(self, delivery_event: Dict[str, Any]):
+        """納品完了から逆方向にスケジューリング"""
+        plan_id = delivery_event['plan_id']
+        product_id = delivery_event['product_id']
+        quantity = delivery_event['quantity']
+        due_date = delivery_event['due_date']
+        priority = delivery_event['priority']
+        completion_time = delivery_event['completion_time']
+        store_start_time = delivery_event['store_start_time']
+        store_process_id = delivery_event['store_process_id']
+        
+        # 完成品ストアの処理をスケジュール
+        store_operation = ScheduledOperation(
+            operation_id=f"store_{plan_id}",
+            order_id=plan_id,
+            process_id=store_process_id,
+            product_id=product_id,
+            quantity=quantity,
+            scheduled_start=store_start_time,
+            scheduled_end=completion_time,
+            priority=priority,
+            estimated_duration=self.factory.processes[store_process_id].cycle_time
+        )
+        
+        # スケジュールに追加
+        if store_process_id not in self.resource_schedules:
+            self.resource_schedules[store_process_id] = []
+        self.resource_schedules[store_process_id].append(store_operation)
+        
+        # 上流工程への要求を生成
+        await self._generate_upstream_requests(
+            target_process_id=store_process_id,
+            required_product_id=product_id,
+            required_quantity=quantity,
+            required_delivery_time=store_start_time,
+            requesting_process_id=store_process_id,
+            priority=priority
+        )
+    
+    async def _generate_upstream_requests(self, target_process_id: str, required_product_id: str, 
+                                        required_quantity: int, required_delivery_time: datetime,
+                                        requesting_process_id: str, priority: int):
+        """上流工程への要求を生成"""
+        # 対象工程の上流工程を取得
+        upstream_processes = self.factory.get_upstream_processes(target_process_id)
+        
+        for upstream_process in upstream_processes:
+            # 接続情報を取得
+            connection = self.factory.get_connection_between(
+                upstream_process.id, target_process_id
+            )
+            
+            if not connection:
+                continue
+            
+            # 搬送時間を考慮した上流工程の納期を計算
+            transport_duration = connection.get_transport_duration()
+            upstream_delivery_time = required_delivery_time - timedelta(seconds=transport_duration)
+            
+            # 上流工程の処理時間を考慮した開始時刻を計算
+            upstream_start_time = upstream_delivery_time - timedelta(seconds=upstream_process.cycle_time)
+            
+            # 上流工程の処理をスケジュール
+            upstream_operation = ScheduledOperation(
+                operation_id=f"upstream_{upstream_process.id}_{uuid.uuid4().hex[:8]}",
+                order_id=f"req_{uuid.uuid4().hex[:8]}",
+                process_id=upstream_process.id,
+                product_id=required_product_id,
+                quantity=required_quantity,
+                scheduled_start=upstream_start_time,
+                scheduled_end=upstream_delivery_time,
+                priority=priority,
+                estimated_duration=upstream_process.cycle_time
+            )
+            
+            # スケジュールに追加
+            if upstream_process.id not in self.resource_schedules:
+                self.resource_schedules[upstream_process.id] = []
+            self.resource_schedules[upstream_process.id].append(upstream_operation)
+            
+            # さらに上流への要求を再帰的に生成
+            await self._generate_upstream_requests(
+                target_process_id=upstream_process.id,
+                required_product_id=required_product_id,
+                required_quantity=required_quantity,
+                required_delivery_time=upstream_delivery_time,
+                requesting_process_id=upstream_process.id,
+                priority=priority
+            )
+            
+            # 搬送処理もスケジュール
+            transport_operation = ScheduledOperation(
+                operation_id=f"transport_{connection.id}_{uuid.uuid4().hex[:8]}",
+                order_id=f"req_{uuid.uuid4().hex[:8]}",
+                process_id=connection.id,
+                product_id=required_product_id,
+                quantity=required_quantity,
+                scheduled_start=upstream_delivery_time,
+                scheduled_end=required_delivery_time,
+                priority=priority,
+                estimated_duration=transport_duration
+            )
+            
+            # 搬送スケジュールに追加
+            if connection.id not in self.resource_schedules:
+                self.resource_schedules[connection.id] = []
+            self.resource_schedules[connection.id].append(transport_operation)
+    
     async def _hybrid_scheduling(self):
         """ハイブリッドスケジューリング"""
         # 製品タイプや状況に応じて戦略を切り替え

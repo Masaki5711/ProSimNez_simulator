@@ -501,28 +501,50 @@ class SimulationEngine:
     def run_process(self, process: Process):
         """工程プロセスを実行"""
         def process_runner():
-            while True:
+            lot_counter = 0
+            while self.is_running:
                 try:
+                    # 新しいロットの処理を開始するかチェック
+                    should_start_new_lot = True
+                    
+                    # 入力バッファから材料をチェック
+                    if process.input_buffer_id and process.input_buffer_id in self.factory.buffers:
+                        input_buffer = self.factory.buffers[process.input_buffer_id]
+                        if input_buffer.get_total_quantity() == 0:
+                            should_start_new_lot = False
+                    
+                    if not should_start_new_lot:
+                        yield self.env.timeout(30)  # 30秒待機してから再チェック
+                        continue
+                    
                     # 設備が利用可能になるまで待機
                     equipment = process.get_available_equipment()
                     if not equipment:
-                        yield self.env.timeout(5)  # 5秒待機
+                        yield self.env.timeout(10)  # 10秒待機
                         continue
+                    
+                    lot_counter += 1
                     
                     # 設備を占有
                     equipment.status = "running"
                     
-                    # 加工開始イベント
+                    # 加工開始イベント（ロット処理開始時のみ）
                     event = SimulationEvent(
                         timestamp=self.get_current_datetime(),
                         event_type="process_start",
                         process_id=process.id,
                         equipment_id=equipment.id,
-                        data={"equipment_status": equipment.status}
+                        data={
+                            "equipment_status": equipment.status,
+                            "simulation_time": self.env.now,
+                            "current_time": self.env.now,
+                            "elapsed_time": self.env.now,
+                            "lot_number": lot_counter
+                        }
                     )
                     asyncio.create_task(self.notify_listeners(event))
                     
-                    # 加工時間をシミュレート（30-180秒の範囲）
+                    # 加工時間をシミュレート
                     processing_time = list(process.processing_time.values())[0] if process.processing_time else 60
                     yield self.env.timeout(processing_time)
                     
@@ -535,7 +557,13 @@ class SimulationEngine:
                         event_type="process_complete",
                         process_id=process.id,
                         equipment_id=equipment.id,
-                        data={"equipment_status": equipment.status}
+                        data={
+                            "equipment_status": equipment.status,
+                            "simulation_time": self.env.now,
+                            "current_time": self.env.now,
+                            "elapsed_time": self.env.now,
+                            "lot_number": lot_counter
+                        }
                     )
                     asyncio.create_task(self.notify_listeners(event))
                     
@@ -544,14 +572,17 @@ class SimulationEngine:
                         product_id = list(process.processing_time.keys())[0] if process.processing_time else "SAMPLE_PRODUCT"
                         self.factory.buffers[process.output_buffer_id].add_lot(
                             product_id, 
-                            f"LOT_{int(self.env.now)}_{equipment.id}",
+                            f"LOT_{lot_counter}_{int(self.env.now)}_{equipment.id}",
                             1,
                             process.id
                         )
                     
+                    # 次のロット処理まで少し待機
+                    yield self.env.timeout(5)
+                    
                 except Exception as e:
                     print(f"工程 {process.id} でエラー: {e}")
-                    yield self.env.timeout(10)  # エラー時は10秒待機
+                    yield self.env.timeout(30)  # エラー時は30秒待機
                 
         return self.env.process(process_runner())
         
@@ -636,7 +667,7 @@ class SimulationEngine:
         try:
             last_broadcast = 0
             last_state_capture = 0
-            broadcast_interval = 5  # 5秒ごとに状態をブロードキャスト
+            broadcast_interval = 1  # 1秒ごとに状態をブロードキャスト（リアルタイム性向上）
             # シミュレーション時間に応じて状態キャプチャ間隔を調整
             if duration and duration > 600:  # 10分以上
                 state_capture_interval = 60  # 1分ごと
@@ -656,6 +687,7 @@ class SimulationEngine:
                     
                     # 定期的に状態更新を通知
                     if self.env.now - last_broadcast >= broadcast_interval:
+                        print(f"状態ブロードキャスト送信: シミュレーション時間={self.env.now}, 最後のブロードキャスト={last_broadcast}")
                         await self.broadcast_state()
                         last_broadcast = self.env.now
                     
@@ -701,11 +733,26 @@ class SimulationEngine:
         
     async def broadcast_state(self):
         """現在の状態をブロードキャスト"""
+        current_sim_time = self.env.now
+        print(f"[DEBUG] ブロードキャスト送信 - シミュレーション時間: {current_sim_time}")
+        
+        # 各データを詳細に取得してログ出力
+        inventories = self.get_current_inventories()
+        equipment_states = self.get_equipment_states()
+        kpis = self.calculate_kpis()
+        
+        print(f"[DEBUG] 在庫データ: {inventories}")
+        print(f"[DEBUG] 設備状態: {equipment_states}")
+        print(f"[DEBUG] KPIデータ: {kpis}")
+        
         state = {
             "timestamp": self.get_current_datetime().isoformat(),
-            "inventories": self.get_current_inventories(),
-            "equipment_states": self.get_equipment_states(),
-            "kpis": self.calculate_kpis()
+            "simulation_time": current_sim_time,  # シミュレーション時間を追加
+            "current_time": current_sim_time,     # 現在時間を追加
+            "elapsed_time": current_sim_time,     # 経過時間を追加
+            "inventories": inventories,
+            "equipment_states": equipment_states,
+            "kpis": kpis
         }
         
         event = SimulationEvent(

@@ -74,9 +74,14 @@ const ConnectionEditDialog: React.FC<ConnectionEditDialogProps> = ({
   const [editData, setEditData] = useState<ConnectionData>({
     transportTime: 30,
     transportLotSize: 10,
-    transportCost: 50,
     distance: 10,
     transportType: 'conveyor',
+    transportSettings: {
+      defaultMethod: '',
+      enableCapacityControl: true,
+      enableRouting: false,
+      congestionHandling: 'queue',
+    },
     transportMethods: [],
   });
 
@@ -110,9 +115,14 @@ const ConnectionEditDialog: React.FC<ConnectionEditDialogProps> = ({
       setEditData({
         transportTime: 30,
         transportLotSize: 10,
-        transportCost: 50,
         distance: 10,
         transportType: 'conveyor',
+        transportSettings: {
+          defaultMethod: '',
+          enableCapacityControl: true,
+          enableRouting: false,
+          congestionHandling: 'queue',
+        },
         transportMethods: [],
       });
     }

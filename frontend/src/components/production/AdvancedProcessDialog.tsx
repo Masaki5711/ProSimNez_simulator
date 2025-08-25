@@ -187,6 +187,16 @@ const AdvancedProcessDialog: React.FC<AdvancedProcessDialogProps> = ({
         maxInventory: 50,
         supplierLeadTime: 3,
         kanbanType: 'production'
+      },
+      // ロットサイズベースのバッファー設定
+      bufferSettings: {
+        enabled: true as const,
+        initialStock: 0,
+        safetyStock: 0,
+        maxLots: 5,
+        bufferType: 'input' as const,
+        location: '',
+        notes: ''
       }
     };
     setEditData({
@@ -203,6 +213,16 @@ const AdvancedProcessDialog: React.FC<AdvancedProcessDialogProps> = ({
       unit: '個',
       qualityLevel: 'standard',
       setupTime: 0,
+      cycleTime: 60,
+      bufferSettings: {
+        enabled: true as const,
+        initialStock: 0,
+        safetyStock: 0,
+        maxLots: 5,
+        bufferType: 'output' as const,
+        location: '',
+        notes: ''
+      }
     };
     setEditData({
       ...editData,

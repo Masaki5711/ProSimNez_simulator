@@ -139,20 +139,21 @@ const ProcessNode: React.FC<NodeProps<ProcessNodeData>> = ({ data, selected, id 
         </Typography>
       </Box>
       
-      {/* バッファ情報 */}
+      {/* WIP情報 - バッファは材料設定で管理 */}
       <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
-        <Tooltip title="入力バッファ">
+        <Tooltip title="仕掛在庫 (WIP)">
           <Chip
-            label={`IN: ${data.currentWIP || 0}/${data.inputBufferCapacity}`}
+            label={`WIP: ${data.currentWIP || 0}`}
             size="small"
-            color={data.currentWIP && data.currentWIP > data.inputBufferCapacity * 0.8 ? 'warning' : 'default'}
+            color="default"
           />
         </Tooltip>
-        <Tooltip title="出力バッファ">
+        <Tooltip title="バッファ設定は材料設定で管理">
           <Chip
-            label={`OUT: ${data.outputBufferCapacity}`}
+            label="バッファ: 材料設定"
             size="small"
             variant="outlined"
+            color="info"
           />
         </Tooltip>
       </Box>
@@ -177,7 +178,7 @@ const ProcessNode: React.FC<NodeProps<ProcessNodeData>> = ({ data, selected, id 
       )}
       
       {/* 品質指標 */}
-      {data.defectRate > 0 && (
+      {data.defectRate && data.defectRate > 0 && (
         <Typography variant="caption" color="error" sx={{ display: 'block', mt: 0.5 }}>
           不良率: {data.defectRate}%
         </Typography>

@@ -61,6 +61,7 @@ class SimulationConfig(BaseModel):
     start_time: str = "2024-01-01T08:00:00"
     duration: Optional[float] = None  # None = 無制限
     speed: float = 1.0
+    network_data: Optional[Dict[str, Any]] = None  # ネットワークエディターからのデータ
 
 class SimulationStatus(BaseModel):
     """シミュレーション状態"""
@@ -232,146 +233,167 @@ def create_sample_factory() -> Factory:
 
 @router.post("/start")
 async def start_simulation(config: SimulationConfig, background_tasks: BackgroundTasks):
-    """シミュレーションを開始"""
-    global simulation_engine, simulation_task
+    """シミュレーションを開始（enhanced_simulatorを使用）"""
+    import app.api.websocket_api as ws_api
+    import logging
+    logger = logging.getLogger(__name__)
     
     try:
-        # 既存のシミュレーションを停止
-        if simulation_engine and simulation_engine.is_running:
-            await simulation_engine.stop()
+        # 全てのシミュレーションエンジンを停止
+        global simulation_engine, master_simulator, network_based_simulator, simulation_task, network_simulation_task
+        
+        # 古いSimulationEngineを停止
+        if simulation_engine:
+            try:
+                await simulation_engine.stop()
+                logger.info("古いSimulationEngineを停止しました")
+            except:
+                pass
+            simulation_engine = None
             
+        # MasterSimulatorを停止
+        if master_simulator:
+            try:
+                await master_simulator.stop_simulation()
+                logger.info("MasterSimulatorを停止しました")
+            except:
+                pass
+            master_simulator = None
+            
+        # NetworkBasedSimulatorを停止
+        if network_based_simulator:
+            try:
+                await network_based_simulator.stop()
+                logger.info("NetworkBasedSimulatorを停止しました")
+            except:
+                pass
+            network_based_simulator = None
+            
+        # タスクをキャンセル
         if simulation_task and not simulation_task.done():
             simulation_task.cancel()
+            simulation_task = None
+            
+        if network_simulation_task and not network_simulation_task.done():
+            network_simulation_task.cancel()
+            network_simulation_task = None
         
-        # 新しいシミュレーションエンジンを作成
+        # 既存のenhanced_simulatorも停止
+        if ws_api.enhanced_simulator:
+            try:
+                await ws_api.enhanced_simulator.stop_simulation()
+                logger.info("既存のenhanced_simulatorを停止しました")
+            except:
+                pass
+        
+        # 新しいenhanced_simulatorを作成
+        from app.core.enhanced_simulator import EnhancedSimulationEngine
         factory = create_sample_factory()
-        start_time = datetime.fromisoformat(config.start_time.replace('Z', '+00:00'))
+        ws_api.enhanced_simulator = EnhancedSimulationEngine(factory=factory)
         
-        simulation_engine = SimulationEngine(
-            factory=factory,
-            start_time=start_time,
-            speed=config.speed
-        )
+        enhanced_simulator = ws_api.enhanced_simulator
+            
+        # シミュレーション開始
+        success = await enhanced_simulator.start_simulation(config.duration)
         
-        # フェーズ２テスト設定を追加
-        config_dict = {
-            "start_time": config.start_time,
-            "speed": config.speed,
-            "duration": config.duration,
-            "factory_processes": len(factory.processes),
-            "factory_buffers": len(factory.buffers),
-            "test_mode": True,
-            "event_generation_interval": 10  # 10秒ごとにテストイベント生成
-        }
-        simulation_engine.start_phase2_test(config_dict)
-        
-        # WebSocketイベントリスナーを追加
-        from app.main import websocket_event_listener
-        simulation_engine.add_event_listener(websocket_event_listener)
-        
-        # バックグラウンドでシミュレーションを開始
-        simulation_task = asyncio.create_task(simulation_engine.start(config.duration))
-        
-        return {
-            "message": "シミュレーションが開始されました（フェーズ２テストログ有効）",
-            "status": "running",
-            "config": config.dict()
-        }
+        if success:
+            return {
+                "success": True,
+                "message": "シミュレーションが開始されました",
+                "engine_type": "enhanced",
+                "simulation_id": str(enhanced_simulator.state.simulation_id),
+                "config": config.dict()
+            }
+        else:
+            return {
+                "success": False,
+                "message": "シミュレーションの開始に失敗しました"
+            }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"シミュレーション開始エラー: {str(e)}")
+        return {
+            "success": False,
+            "message": f"シミュレーション開始エラー: {str(e)}"
+        }
 
 @router.post("/pause")
 async def pause_simulation():
-    """シミュレーションを一時停止"""
-    global simulation_engine
+    """シミュレーションを一時停止（enhanced_simulatorを使用）"""
+    import app.api.websocket_api as ws_api
     
-    if not simulation_engine:
-        raise HTTPException(status_code=400, detail="シミュレーションが開始されていません")
+    if not ws_api.enhanced_simulator:
+        return {"success": False, "message": "シミュレーションが開始されていません"}
         
     try:
-        await simulation_engine.pause()
-        return {"message": "シミュレーションが一時停止されました", "status": "paused"}
+        success = await ws_api.enhanced_simulator.pause_simulation()
+        if success:
+            return {"success": True, "message": "シミュレーションが一時停止されました", "status": "paused"}
+        else:
+            return {"success": False, "message": "一時停止に失敗しました"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"一時停止エラー: {str(e)}")
+        return {"success": False, "message": f"一時停止エラー: {str(e)}"}
 
 @router.post("/resume")
 async def resume_simulation():
-    """シミュレーションを再開"""
-    global simulation_engine
+    """シミュレーションを再開（enhanced_simulatorを使用）"""
+    import app.api.websocket_api as ws_api
     
-    if not simulation_engine:
-        raise HTTPException(status_code=400, detail="シミュレーションが開始されていません")
+    if not ws_api.enhanced_simulator:
+        return {"success": False, "message": "シミュレーションが開始されていません"}
         
     try:
-        await simulation_engine.resume()
-        return {"message": "シミュレーションが再開されました", "status": "running"}
+        success = await ws_api.enhanced_simulator.resume_simulation()
+        if success:
+            return {"success": True, "message": "シミュレーションが再開されました", "status": "running"}
+        else:
+            return {"success": False, "message": "再開に失敗しました"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"再開エラー: {str(e)}")
+        return {"success": False, "message": f"再開エラー: {str(e)}"}
 
 @router.post("/stop")
 async def stop_simulation():
-    """シミュレーションを停止"""
-    global simulation_engine, simulation_task
+    """シミュレーションを停止（enhanced_simulatorを使用）"""
+    import app.api.websocket_api as ws_api
     
-    if not simulation_engine:
-        raise HTTPException(status_code=400, detail="シミュレーションが開始されていません")
+    if not ws_api.enhanced_simulator:
+        return {"success": False, "message": "シミュレーションが開始されていません"}
         
     try:
-        report_path = None
-        
-        # フェーズ２テスト終了処理
-        try:
-            simulation_engine.end_phase2_test()
-            print("✅ フェーズ２テスト終了処理完了")
-        except Exception as end_error:
-            print(f"⚠️ フェーズ２テスト終了処理エラー: {str(end_error)}")
-        
-        # MDレポート生成
-        try:
-            report_path = simulation_engine.generate_phase2_test_report()
-            print(f"📄 テストレポートが生成されました: {report_path}")
-        except Exception as report_error:
-            print(f"⚠️ レポート生成エラー: {str(report_error)}")
-            report_path = None
-        
-        # シミュレーション停止
-        try:
-            await simulation_engine.stop()
-            print("✅ シミュレーション停止完了")
-        except Exception as stop_error:
-            print(f"⚠️ シミュレーション停止エラー: {str(stop_error)}")
-        
-        if simulation_task and not simulation_task.done():
-            simulation_task.cancel()
-            
-        return {
-            "message": "シミュレーションが停止されました（フェーズ２テストレポート生成完了）",
-            "status": "stopped",
-            "report_path": report_path,
-            "html_report_path": report_path.replace('.md', '.html') if report_path else None
-        }
+        success = await ws_api.enhanced_simulator.stop_simulation()
+        if success:
+            return {
+                "success": True, 
+                "message": "シミュレーションが停止されました", 
+                "status": "stopped",
+                "final_time": ws_api.enhanced_simulator.state.current_time
+            }
+        else:
+            return {"success": False, "message": "停止に失敗しました"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"停止エラー: {str(e)}")
+        return {"success": False, "message": f"停止エラー: {str(e)}"}
 
 @router.get("/status")
 async def get_simulation_status():
-    """シミュレーション状態を取得"""
-    global simulation_engine
+    """シミュレーション状態を取得（enhanced_simulatorを使用）"""
+    import app.api.websocket_api as ws_api
     
-    if not simulation_engine:
+    if not ws_api.enhanced_simulator:
         return {
             "status": "idle",
             "current_time": datetime.now().isoformat(),
+            "simulation_time": 0,
             "speed": 1.0,
             "is_running": False
         }
         
+    state = ws_api.enhanced_simulator.state
     return {
-        "status": "running" if simulation_engine.is_running else "paused" if simulation_engine.is_paused else "idle",
-        "current_time": simulation_engine.get_current_datetime().isoformat(),
-        "speed": simulation_engine.speed,
-        "is_running": simulation_engine.is_running
+        "status": state.status,
+        "current_time": datetime.now().isoformat(),
+        "simulation_time": state.current_time,
+        "speed": 1.0,  # enhanced_simulatorに速度設定があれば使用
+        "is_running": state.status == "running",
+        "progress": state.progress
     }
 
 @router.post("/speed")

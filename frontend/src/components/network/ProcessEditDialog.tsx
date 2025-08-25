@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { useLanguage } from '../../contexts/LanguageContext';
 import {
   Dialog,
   DialogTitle,
@@ -17,22 +16,26 @@ import {
   Tab,
   Box,
   Typography,
-  Slider,
+  Card,
+  CardContent,
+  CardHeader,
+  Alert,
   SelectChangeEvent,
+  Chip,
 } from '@mui/material';
 import { 
+  Build,
+  Assessment,
+  Settings,
   Inventory as MaterialIcon,
-  Settings as AdvancedIcon,
 } from '@mui/icons-material';
-import { ProcessNodeData, FrequencyTask } from '../../types/networkEditor';
-import { Product, AdvancedProcessData } from '../../types/productionTypes';
-import ProcessMaterialDialog from '../production/ProcessMaterialDialog';
-import AdvancedProcessDialog from '../production/AdvancedProcessDialog';
+import { ProcessNodeData } from '../../types/networkEditor';
+import { Product } from '../../types/productionTypes';
 
 interface ProcessEditDialogProps {
   open: boolean;
   nodeData: ProcessNodeData | null;
-  nodeId?: string; // 工程IDを追加
+  nodeId?: string;
   nodes?: any[];
   edges?: any[];
   processAdvancedData?: Map<string, any>;
@@ -58,183 +61,164 @@ const TabPanel: React.FC<TabPanelProps> = ({ children, value, index }) => {
 const ProcessEditDialog: React.FC<ProcessEditDialogProps> = ({
   open,
   nodeData,
-  nodeId, // 工程IDを追加
-  nodes = [],
-  edges = [],
-  processAdvancedData = new Map(),
+  nodeId,
+  nodes,
+  edges,
+  processAdvancedData: processAdvancedDataMap,
   onClose,
   onSave,
-  products = [],
+  products,
 }) => {
-  const { t } = useLanguage();
-  console.log('ProcessEditDialog: Rendered with open =', open, 'and nodeData =', nodeData, 'and nodeId =', nodeId);
   const [tabValue, setTabValue] = useState(0);
-  const [materialDialogOpen, setMaterialDialogOpen] = useState(false);
-  const [advancedDialogOpen, setAdvancedDialogOpen] = useState(false);
-  const [processData, setProcessData] = useState<AdvancedProcessData | null>(null);
   const [editData, setEditData] = useState<ProcessNodeData>({
     label: '',
-    name: '',
     type: 'machining',
     cycleTime: 60,
-    setupTime: 300,
     equipmentCount: 1,
     operatorCount: 1,
-    inputBufferCapacity: 50,
-    outputBufferCapacity: 50,
-    defectRate: 2,
-    reworkRate: 1,
-    operatingCost: 100,
+    defectRate: 2.0,
+    reworkRate: 1.0,
+    setupTime: 0,
     inputs: [],
     outputs: [],
-    frequencyTasks: [],
   });
+
+  // 品質設定
+  const [qualitySettings, setQualitySettings] = useState({
+    defectRate: 2.0,
+    reworkRate: 1.0,
+    scrapRate: 0.5,
+    inspectionTime: 30,
+    inspectionCapacity: 60,
+  });
+
 
   useEffect(() => {
     if (nodeData) {
       setEditData(nodeData);
+      
+      // 品質設定の初期化
+      setQualitySettings({
+        defectRate: nodeData.qualitySettings?.defectRate || 2.0,
+        reworkRate: nodeData.qualitySettings?.reworkRate || 1.0,
+        scrapRate: nodeData.qualitySettings?.scrapRate || 0.5,
+        inspectionTime: nodeData.qualitySettings?.inspectionTime || 30,
+        inspectionCapacity: nodeData.qualitySettings?.inspectionCapacity || 60,
+      });
     }
   }, [nodeData]);
 
   const handleChange = (field: keyof ProcessNodeData) => (
     event: React.ChangeEvent<HTMLInputElement>
   ) => {
-    const value = event.target.value;
-    // 数値フィールドの場合は数値に変換
-    const numericFields = [
-      'cycleTime', 'setupTime', 'equipmentCount', 'operatorCount',
-      'inputBufferCapacity', 'outputBufferCapacity', 'defectRate', 'reworkRate', 'operatingCost'
-    ];
-    
-    let processedValue: any = value;
-    
-    if (numericFields.includes(field)) {
-      const numValue = Number(value) || 0;
-      // 数値の範囲チェック
-      if (field === 'defectRate' || field === 'reworkRate') {
-        // パーセンテージフィールドは0-100の範囲
-        processedValue = Math.max(0, Math.min(100, numValue));
-      } else if (field === 'equipmentCount' || field === 'operatorCount') {
-        // 台数・人数は0以上の整数
-        processedValue = Math.max(0, Math.floor(numValue));
-      } else {
-        // その他の数値フィールドは0以上
-        processedValue = Math.max(0, numValue);
-      }
-    }
-    
-    setEditData({
-      ...editData,
-      [field]: processedValue,
-    });
+    const value = event.target.type === 'number' ? Number(event.target.value) : event.target.value;
+    setEditData({ ...editData, [field]: value });
   };
 
   const handleSelectChange = (field: keyof ProcessNodeData) => (
-    event: SelectChangeEvent
+    event: SelectChangeEvent<string>
   ) => {
-    setEditData({
-      ...editData,
-      [field]: event.target.value,
-    });
+    setEditData({ ...editData, [field]: event.target.value });
   };
 
-  const handleSliderChange = (field: keyof ProcessNodeData) => (
-    _: Event,
-    value: number | number[]
-  ) => {
-    setEditData({
-      ...editData,
-      [field]: value as number,
-    });
+  const updateQualitySetting = (field: keyof typeof qualitySettings, value: number) => {
+    setQualitySettings({ ...qualitySettings, [field]: value });
   };
 
   const handleSave = () => {
-    onSave(editData);
+    const savedData: ProcessNodeData = {
+      ...editData,
+      qualitySettings,
+      // 既存のinputs/outputsを保持（ProcessMaterialDialogで設定された情報を維持）
+      inputs: nodeData?.inputs || editData.inputs || [],
+      outputs: nodeData?.outputs || editData.outputs || [],
+    };
+    
+    console.log('🔍 ProcessEditDialog handleSave - 保存データ:', {
+      nodeId: savedData.id,
+      savedInputs: savedData.inputs,
+      savedOutputs: savedData.outputs,
+      originalInputs: nodeData?.inputs,
+      originalOutputs: nodeData?.outputs,
+      editDataInputs: editData.inputs,
+      editDataOutputs: editData.outputs
+    });
+    
+    onSave(savedData);
+  };
+
+  const openMaterialDialog = () => {
+    // 右クリックメニューの材料設定と同じイベントを発火
+    const customEvent = new CustomEvent('openMaterialDialog', {
+      detail: { nodeId: nodeId || editData.id, nodeData: editData }
+    });
+    window.dispatchEvent(customEvent);
+    
+    // ProcessEditDialogを閉じる
     onClose();
   };
 
-  return (
-    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-      <DialogTitle>工程パラメータ編集</DialogTitle>
-      <DialogContent>
-        <Tabs value={tabValue} onChange={(_, v) => setTabValue(v)}>
-                       <Tab label={t('process.basicSettings')} />
-                       <Tab label={t('process.advancedSettings')} />
-                       <Tab label={t('process.qualitySettings')} />
-          <Tab 
-                          label={t('process.materialSettings')} 
-            icon={<MaterialIcon />}
-            iconPosition="start"
-          />
-          <Tab 
-            label="拡張設定" 
-            icon={<AdvancedIcon />}
-            iconPosition="start"
-          />
-          <Tab label="頻度作業" />
-        </Tabs>
 
+  return (
+    <Dialog 
+      open={open} 
+      onClose={onClose} 
+      maxWidth="lg" 
+      fullWidth
+      PaperProps={{
+        sx: { maxHeight: '90vh' }
+      }}
+    >
+      <DialogTitle>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Build color="primary" />
+          <Typography variant="h6">工程設定</Typography>
+          <Chip label={nodeId || editData.label} size="small" />
+        </Box>
+      </DialogTitle>
+      
+      <DialogContent>
+        <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
+          <Tabs value={tabValue} onChange={(_, v) => setTabValue(v)}>
+            <Tab label="基本設定" icon={<Settings />} iconPosition="start" />
+            <Tab label="品質管理" icon={<Assessment />} iconPosition="start" />
+            <Tab label="材料設定" icon={<MaterialIcon />} iconPosition="start" />
+          </Tabs>
+        </Box>
+
+        {/* 基本設定タブ */}
         <TabPanel value={tabValue} index={0}>
-          <Grid container spacing={2}>
+          <Grid container spacing={3}>
             <Grid item xs={12} md={6}>
               <TextField
                 fullWidth
-                label={t('network.processName')}
+                label="工程名"
                 value={editData.label}
                 onChange={handleChange('label')}
               />
             </Grid>
             <Grid item xs={12} md={6}>
               <FormControl fullWidth>
-                <InputLabel>{t('network.processType')}</InputLabel>
+                <InputLabel>工程タイプ</InputLabel>
                 <Select
                   value={editData.type}
                   onChange={handleSelectChange('type')}
-                                      label={t('network.processType')}
+                  label="工程タイプ"
                 >
-                                       <MenuItem value="machining">{t('process.machining')}</MenuItem>
-                  <MenuItem value="assembly">{t('process.assembly')}</MenuItem>
-                  <MenuItem value="inspection">{t('process.inspection')}</MenuItem>
-                  <MenuItem value="storage">{t('process.storage')}</MenuItem>
+                  <MenuItem value="machining">加工</MenuItem>
+                  <MenuItem value="assembly">組立</MenuItem>
+                  <MenuItem value="inspection">検査</MenuItem>
+                  <MenuItem value="storage">保管</MenuItem>
                   <MenuItem value="shipping">出荷</MenuItem>
                 </Select>
               </FormControl>
             </Grid>
+            
             <Grid item xs={12} md={6}>
               <TextField
                 fullWidth
                 type="number"
-                                   label={t('process.cycleTime')}
-                value={editData.cycleTime}
-                onChange={handleChange('cycleTime')}
-                InputProps={{
-                  endAdornment: <InputAdornment position="end">秒</InputAdornment>,
-                }}
-              />
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <TextField
-                fullWidth
-                type="number"
-                label="段取り時間（秒）"
-                value={editData.setupTime || 0}
-                onChange={handleChange('setupTime')}
-                InputProps={{
-                  endAdornment: <InputAdornment position="end">秒</InputAdornment>,
-                }}
-                helperText="出力製品が未設定の場合のデフォルト段取り時間"
-              />
-            </Grid>
-          </Grid>
-        </TabPanel>
-
-        <TabPanel value={tabValue} index={1}>
-          <Grid container spacing={2}>
-            <Grid item xs={12} md={6}>
-              <TextField
-                fullWidth
-                type="number"
-                                   label={t('process.equipmentCount')}
+                label="設備台数"
                 value={editData.equipmentCount}
                 onChange={handleChange('equipmentCount')}
                 inputProps={{ min: 1 }}
@@ -244,372 +228,142 @@ const ProcessEditDialog: React.FC<ProcessEditDialogProps> = ({
               <TextField
                 fullWidth
                 type="number"
-                                   label={t('process.operatorCount')}
+                label="作業者数"
                 value={editData.operatorCount}
                 onChange={handleChange('operatorCount')}
                 inputProps={{ min: 0 }}
               />
             </Grid>
+            
             <Grid item xs={12}>
-              <Typography gutterBottom>可動率: 計算結果</Typography>
-              <Typography variant="body2" color="text.secondary">
-                可動率は設備の稼働状況から自動計算されます
-              </Typography>
+              <Alert severity="info">
+                <Typography variant="body2">
+                  💡 <strong>バッファ設定について</strong>
+                </Typography>
+                <Typography variant="body2" sx={{ mt: 1 }}>
+                  入力・出力バッファは「材料設定」タブで部品・製品ごとに個別に設定します。
+                  これにより、各材料や製品に最適なバッファサイズを設定できます。
+                </Typography>
+              </Alert>
             </Grid>
-            <Grid item xs={12} md={6}>
-              <TextField
-                fullWidth
-                type="number"
-                                   label={t('process.inputBufferCapacity')}
-                value={editData.inputBufferCapacity}
-                onChange={handleChange('inputBufferCapacity')}
-                inputProps={{ min: 0 }}
-              />
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <TextField
-                fullWidth
-                type="number"
-                                   label={t('process.outputBufferCapacity')}
-                value={editData.outputBufferCapacity}
-                onChange={handleChange('outputBufferCapacity')}
-                inputProps={{ min: 0 }}
-              />
+            
+            {/* 注意書き */}
+            <Grid item xs={12}>
+              <Card variant="outlined" sx={{ bgcolor: 'info.50', borderColor: 'info.200' }}>
+                <CardContent>
+                  <Typography variant="body2" color="info.main">
+                    📋 <strong>注意:</strong> サイクルタイムは材料設定の出力製品ごとに個別設定してください。
+                  </Typography>
+                </CardContent>
+              </Card>
             </Grid>
           </Grid>
         </TabPanel>
 
-        <TabPanel value={tabValue} index={2}>
-          <Grid container spacing={2}>
-            <Grid item xs={12}>
-                               <Typography gutterBottom>{t('process.defectRate')}: {editData.defectRate}%</Typography>
-              <Slider
-                value={editData.defectRate}
-                onChange={handleSliderChange('defectRate')}
-                min={0}
-                max={10}
-                step={0.1}
-                marks={[
-                  { value: 0, label: '0%' },
-                  { value: 2, label: '2%' },
-                  { value: 5, label: '5%' },
-                  { value: 10, label: '10%' },
-                ]}
-              />
-            </Grid>
-            <Grid item xs={12}>
-                               <Typography gutterBottom>{t('process.reworkRate')}: {editData.reworkRate}%</Typography>
-              <Slider
-                value={editData.reworkRate}
-                onChange={handleSliderChange('reworkRate')}
-                min={0}
-                max={5}
-                step={0.1}
-                marks={[
-                  { value: 0, label: '0%' },
-                  { value: 1, label: '1%' },
-                  { value: 2.5, label: '2.5%' },
-                  { value: 5, label: '5%' },
-                ]}
-              />
-            </Grid>
-            <Grid item xs={12}>
+        {/* 品質管理タブ */}
+        <TabPanel value={tabValue} index={1}>
+          <Typography variant="h6" gutterBottom>品質設定</Typography>
+          
+          <Grid container spacing={3}>
+            <Grid item xs={12} md={6}>
               <TextField
                 fullWidth
                 type="number"
-                                   label={t('process.operatingCost')}
-                value={editData.operatingCost}
-                onChange={handleChange('operatingCost')}
+                label="不良率"
+                value={qualitySettings.defectRate}
+                onChange={(e) => updateQualitySetting('defectRate', Number(e.target.value))}
                 InputProps={{
-                  startAdornment: <InputAdornment position="start">¥</InputAdornment>,
-                  endAdornment: <InputAdornment position="end">/時間</InputAdornment>,
+                  endAdornment: <InputAdornment position="end">%</InputAdornment>,
+                }}
+                inputProps={{ min: 0, max: 100, step: 0.1 }}
+              />
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <TextField
+                fullWidth
+                type="number"
+                label="手直し率"
+                value={qualitySettings.reworkRate}
+                onChange={(e) => updateQualitySetting('reworkRate', Number(e.target.value))}
+                InputProps={{
+                  endAdornment: <InputAdornment position="end">%</InputAdornment>,
+                }}
+                inputProps={{ min: 0, max: 100, step: 0.1 }}
+              />
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <TextField
+                fullWidth
+                type="number"
+                label="廃棄率"
+                value={qualitySettings.scrapRate}
+                onChange={(e) => updateQualitySetting('scrapRate', Number(e.target.value))}
+                InputProps={{
+                  endAdornment: <InputAdornment position="end">%</InputAdornment>,
+                }}
+                inputProps={{ min: 0, max: 100, step: 0.1 }}
+              />
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <TextField
+                fullWidth
+                type="number"
+                label="検査時間"
+                value={qualitySettings.inspectionTime}
+                onChange={(e) => updateQualitySetting('inspectionTime', Number(e.target.value))}
+                InputProps={{
+                  endAdornment: <InputAdornment position="end">秒</InputAdornment>,
                 }}
               />
             </Grid>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                type="number"
+                label="検査能力"
+                value={qualitySettings.inspectionCapacity}
+                onChange={(e) => updateQualitySetting('inspectionCapacity', Number(e.target.value))}
+                InputProps={{
+                  endAdornment: <InputAdornment position="end">個/時</InputAdornment>,
+                }}
+                inputProps={{ min: 1 }}
+              />
+            </Grid>
           </Grid>
+
+          {/* 品質統計表示 */}
+          <Alert severity="info" sx={{ mt: 3 }}>
+            良品率: {(100 - qualitySettings.defectRate - qualitySettings.reworkRate - qualitySettings.scrapRate).toFixed(1)}%
+          </Alert>
         </TabPanel>
 
         {/* 材料設定タブ */}
-        <TabPanel value={tabValue} index={3}>
+        <TabPanel value={tabValue} index={2}>
           <Box sx={{ textAlign: 'center', py: 4 }}>
             <MaterialIcon sx={{ fontSize: 48, color: 'primary.main', mb: 2 }} />
             <Typography variant="h6" gutterBottom>
-              工程材料設定
+              投入材料・出力製品設定
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-              この工程で使用する材料・部品と出力製品を設定します
+              この工程で使用する材料・部品と出力製品を設定します。
             </Typography>
             <Button
               variant="contained"
               startIcon={<MaterialIcon />}
-              onClick={() => {
-                if (nodeId) {
-                  console.log('Opening material dialog for process:', nodeId);
-                  
-                  // NetworkEditorの材料設定ダイアログを直接開く
-                  // カスタムイベントを発火
-                  const event = new CustomEvent('openMaterialDialog', {
-                    detail: {
-                      nodeId: nodeId,
-                      nodeData: editData
-                    }
-                  });
-                  window.dispatchEvent(event);
-                  
-                  // ProcessEditDialogを閉じる
-                  onClose();
-                } else {
-                  console.error('No nodeId provided for material dialog');
-                  alert('工程IDが設定されていません。工程を右クリック → 「材料設定」から開いてください。');
-                }
-              }}
+              onClick={openMaterialDialog}
             >
               材料設定を開く
             </Button>
-            
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 2 }}>
-              💡 ヒント: 工程を右クリック → 「材料設定」からも開けます
-            </Typography>
-          </Box>
-        </TabPanel>
-
-        {/* 拡張設定タブ */}
-        <TabPanel value={tabValue} index={4}>
-          <Box sx={{ textAlign: 'center', py: 4 }}>
-            <AdvancedIcon sx={{ fontSize: 48, color: 'primary.main', mb: 2 }} />
-            <Typography variant="h6" gutterBottom>
-              拡張工程設定
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-              スケジューリング、品質管理、技能要件などの詳細設定を行います
-            </Typography>
-            <Button
-              variant="contained"
-              startIcon={<AdvancedIcon />}
-              onClick={() => {
-                if (editData) {
-                  const advancedData: AdvancedProcessData = {
-                    id: editData.label || 'process',
-                    label: editData.label,
-                    type: editData.type,
-                    cycleTime: editData.cycleTime,
-                    setupTime: editData.setupTime, // 基本設定の段取り時間
-                    equipmentCount: editData.equipmentCount,
-                    operatorCount: editData.operatorCount,
-                    availability: 85, // デフォルト値
-                    inputMaterials: [],
-                    outputProducts: [],
-                    bomMappings: [],
-                    schedulingMode: 'push',
-                    batchSize: 1,
-                    minBatchSize: 1,
-                    maxBatchSize: 100,
-                    defectRate: editData.defectRate,
-                    reworkRate: editData.reworkRate,
-                    operatingCost: editData.operatingCost,
-                    qualityCheckpoints: [],
-                    skillRequirements: [],
-                    toolRequirements: [],
-                    capacityConstraints: [],
-                    setupHistory: [],
-                  };
-                  setProcessData(advancedData);
-                  setAdvancedDialogOpen(true);
-                }
-              }}
-            >
-              拡張設定を開く
-            </Button>
-          </Box>
-        </TabPanel>
-
-        {/* 頻度作業タブ */}
-        <TabPanel value={tabValue} index={5}>
-          <Box>
-            <Typography variant="subtitle1" gutterBottom>
-              頻度作業の設定（定期・確率）
-            </Typography>
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              {(editData.frequencyTasks || []).map((task, idx) => (
-                <Grid container spacing={2} key={task.id} alignItems="center">
-                  <Grid item xs={12} md={3}>
-                    <TextField
-                      fullWidth
-                      label="作業名"
-                      value={task.name}
-                      onChange={(e) => {
-                        const copy = [...(editData.frequencyTasks || [])];
-                        copy[idx] = { ...task, name: e.target.value };
-                        setEditData({ ...editData, frequencyTasks: copy });
-                      }}
-                    />
-                  </Grid>
-                  <Grid item xs={12} md={2}>
-                    <FormControl fullWidth>
-                      <InputLabel>タイプ</InputLabel>
-                      <Select
-                        label="タイプ"
-                        value={task.taskType}
-                        onChange={(e) => {
-                          const copy = [...(editData.frequencyTasks || [])];
-                          const newType = e.target.value as FrequencyTask['taskType'];
-                          copy[idx] = { ...task, taskType: newType };
-                          setEditData({ ...editData, frequencyTasks: copy });
-                        }}
-                      >
-                        <MenuItem value="interval">定期（間隔）</MenuItem>
-                        <MenuItem value="probabilistic">確率</MenuItem>
-                      </Select>
-                    </FormControl>
-                  </Grid>
-                  {task.taskType === 'interval' && (
-                    <Grid item xs={12} md={3}>
-                      <TextField
-                        fullWidth
-                        type="number"
-                        label="発生間隔（秒）"
-                        value={task.intervalSeconds || 0}
-                        onChange={(e) => {
-                          const copy = [...(editData.frequencyTasks || [])];
-                          copy[idx] = { ...task, intervalSeconds: Math.max(0, Number(e.target.value) || 0) };
-                          setEditData({ ...editData, frequencyTasks: copy });
-                        }}
-                      />
-                    </Grid>
-                  )}
-                  {task.taskType === 'probabilistic' && (
-                    <>
-                      <Grid item xs={12} md={3}>
-                        <TextField
-                          fullWidth
-                          type="number"
-                          label="チェック周期（秒）"
-                          value={task.checkIntervalSeconds || 60}
-                          onChange={(e) => {
-                            const copy = [...(editData.frequencyTasks || [])];
-                            copy[idx] = { ...task, checkIntervalSeconds: Math.max(1, Number(e.target.value) || 1) };
-                            setEditData({ ...editData, frequencyTasks: copy });
-                          }}
-                        />
-                      </Grid>
-                      <Grid item xs={12} md={3}>
-                        <TextField
-                          fullWidth
-                          type="number"
-                          label="発生確率（0-1）"
-                          value={task.probability ?? 0.1}
-                          inputProps={{ step: 0.01, min: 0, max: 1 }}
-                          onChange={(e) => {
-                            const val = Math.max(0, Math.min(1, Number(e.target.value)));
-                            const copy = [...(editData.frequencyTasks || [])];
-                            copy[idx] = { ...task, probability: isNaN(val) ? 0 : val };
-                            setEditData({ ...editData, frequencyTasks: copy });
-                          }}
-                        />
-                      </Grid>
-                    </>
-                  )}
-                  <Grid item xs={12} md={2}>
-                    <TextField
-                      fullWidth
-                      type="number"
-                      label="所要時間（秒）"
-                      value={task.durationSeconds}
-                      onChange={(e) => {
-                        const copy = [...(editData.frequencyTasks || [])];
-                        copy[idx] = { ...task, durationSeconds: Math.max(0, Number(e.target.value) || 0) };
-                        setEditData({ ...editData, frequencyTasks: copy });
-                      }}
-                    />
-                  </Grid>
-                  <Grid item xs={12} md={2}>
-                    <FormControl fullWidth>
-                      <InputLabel>停止要否</InputLabel>
-                      <Select
-                        label="停止要否"
-                        value={task.requiresStop ? 'yes' : 'no'}
-                        onChange={(e) => {
-                          const copy = [...(editData.frequencyTasks || [])];
-                          copy[idx] = { ...task, requiresStop: e.target.value === 'yes' };
-                          setEditData({ ...editData, frequencyTasks: copy });
-                        }}
-                      >
-                        <MenuItem value="no">不要</MenuItem>
-                        <MenuItem value="yes">必要</MenuItem>
-                      </Select>
-                    </FormControl>
-                  </Grid>
-                  <Grid item xs={12} md={12}>
-                    <Button color="error" onClick={() => {
-                      const copy = [...(editData.frequencyTasks || [])];
-                      copy.splice(idx, 1);
-                      setEditData({ ...editData, frequencyTasks: copy });
-                    }}>削除</Button>
-                  </Grid>
-                </Grid>
-              ))}
-              <Box>
-                <Button variant="outlined" onClick={() => {
-                  const newTask: FrequencyTask = {
-                    id: Date.now().toString(),
-                    name: '頻度作業',
-                    taskType: 'interval',
-                    intervalSeconds: 3600,
-                    durationSeconds: 60,
-                    requiresStop: false,
-                  };
-                  setEditData({ ...editData, frequencyTasks: [...(editData.frequencyTasks || []), newTask] });
-                }}>+ 追加</Button>
-              </Box>
-            </Box>
           </Box>
         </TabPanel>
       </DialogContent>
+      
       <DialogActions>
         <Button onClick={onClose}>キャンセル</Button>
-        <Button onClick={handleSave} variant="contained">
+        <Button variant="contained" onClick={handleSave}>
           保存
         </Button>
       </DialogActions>
-
-      {/* 材料設定ダイアログ */}
-      <ProcessMaterialDialog
-        open={materialDialogOpen}
-        processData={processData}
-        products={products}
-        nodes={nodes}
-        edges={edges}
-        processAdvancedData={processAdvancedData}
-        isStorageProcess={editData.type === 'store'}
-        onClose={() => {
-          setMaterialDialogOpen(false);
-          setProcessData(null);
-        }}
-        onSave={(processData) => {
-          console.log('Process material data saved:', processData);
-          setMaterialDialogOpen(false);
-          setProcessData(null);
-        }}
-      />
-
-      {/* 拡張設定ダイアログ */}
-      <AdvancedProcessDialog
-        open={advancedDialogOpen}
-        processData={processData}
-        products={products}
-        nodes={nodes}
-        edges={edges}
-        processAdvancedData={processAdvancedData}
-        onClose={() => {
-          setAdvancedDialogOpen(false);
-          setProcessData(null);
-        }}
-        onSave={(processData) => {
-          console.log('Advanced process data saved:', processData);
-          setAdvancedDialogOpen(false);
-          setProcessData(null);
-        }}
-      />
     </Dialog>
   );
 };

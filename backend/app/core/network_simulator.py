@@ -470,11 +470,30 @@ class NetworkBasedSimulator:
     
     def _setup_initial_inventory(self):
         """初期在庫を設定"""
-        # 各バッファに初期在庫を設定
+        print(f"🔧 初期在庫設定開始: {len(self.factory.buffers)}個のバッファ")
+        
+        # 全ての入力バッファに初期在庫を設定
         for buffer in self.factory.buffers.values():
             if "IN" in buffer.id:  # 入力バッファ
                 # 初期在庫を設定
-                buffer.add_lot("INITIAL_PRODUCT", "LOT_INITIAL", 10, "initial")
+                buffer.add_lot("INITIAL_PRODUCT", "LOT_INITIAL", 50, "initial")
+                print(f"📦 初期在庫追加: {buffer.id} に 50個")
+        
+        # 開始工程（入力接続がない工程）を特定して追加在庫投入
+        start_processes = []
+        for process in self.factory.processes.values():
+            incoming_edges = [edge for edge in self.edges if edge.target == process.id]
+            if len(incoming_edges) == 0:
+                start_processes.append(process)
+        
+        print(f"🚀 開始工程特定: {len(start_processes)}個")
+        for process in start_processes:
+            buffer_id = f"BUF_IN_{process.id}"
+            if buffer_id in self.factory.buffers:
+                buffer = self.factory.buffers[buffer_id]
+                # 開始工程には大量の初期材料を投入
+                buffer.add_lot("START_MATERIAL", "LOT_START", 100, "start_process")
+                print(f"🎯 開始工程材料追加: {process.id} に 100個")
     
     def _log_event(self, event_type: str, process_id: str, equipment_id: str = None):
         """イベントを記録"""

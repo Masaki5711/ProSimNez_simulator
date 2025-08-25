@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { RootState, AppDispatch } from '../../store';
-import { setNodes, setEdges } from '../../store/slices/networkSlice';
+import { setNodes as setReduxNodes, setEdges as setReduxEdges } from '../../store/slices/networkSlice';
 import { fetchProjectNetwork, updateProjectNetwork } from '../../store/projectSlice';
 import { useLanguage } from '../../contexts/LanguageContext';
 import ReactFlow, {
@@ -37,6 +37,7 @@ import {
   Inventory as StorageIcon,
 
   Rule as ValidateIcon,
+  Balance as MaterialBalanceIcon,
 
   Folder as ProjectIcon,
   Help as HelpIcon,
@@ -54,6 +55,7 @@ import AdvancedProcessDialog from '../production/AdvancedProcessDialog';
 import ProcessMaterialDialog from '../production/ProcessMaterialDialog';
 import IEAnalysisPanel from './IEAnalysisPanel';
 import NetworkValidationPanel from './NetworkValidationPanel';
+import MaterialBalancePanel from './MaterialBalancePanel';
 
 import ProcessNode from './ProcessNode';
 import StoreNode from './StoreNode';
@@ -97,6 +99,9 @@ const NetworkEditor = () => {
 
   const { currentProject, networkData } = useSelector((state: RootState) => state.project);
   const { components } = useSelector((state: RootState) => state.components);
+  
+  // プロジェクトストアからproductsも取得（フォールバック用）
+  const projectProducts = useSelector((state: RootState) => state.project.networkData?.products) || [];
 
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
@@ -118,12 +123,13 @@ const NetworkEditor = () => {
   const [loading, setLoading] = useState(false);
   const [simulationTime, setSimulationTime] = useState(60); // Default to 60 minutes
   const [simulationSpeed, setSimulationSpeed] = useState(1.0); // Default to 1.0x
-  const [activePanel, setActivePanel] = useState<'simulation' | 'analysis' | 'validation' | null>(null);
+  const [activePanel, setActivePanel] = useState<'simulation' | 'analysis' | 'validation' | 'materialBalance' | null>(null);
   const [analysisPanelOpen, setAnalysisPanelOpen] = useState(false);
   const [validationPanelOpen, setValidationPanelOpen] = useState(false);
   const [simulationPanelOpen, setSimulationPanelOpen] = useState(false);
+  const [materialBalancePanelOpen, setMaterialBalancePanelOpen] = useState(false);
 
-  const isPanelOpen = analysisPanelOpen || validationPanelOpen || simulationPanelOpen;
+  const isPanelOpen = analysisPanelOpen || validationPanelOpen || simulationPanelOpen || materialBalancePanelOpen;
 
   // 工程ごとの材料データ管理
   const [processAdvancedData, setProcessAdvancedData] = useState<Map<string, AdvancedProcessData>>(new Map());
@@ -153,8 +159,28 @@ const NetworkEditor = () => {
   // プロジェクトネットワークデータが更新されたときにReactFlowの状態を更新
   useEffect(() => {
     if (networkData) {
+      console.log('🔧 NetworkEditor - networkData updated:', {
+        nodes: networkData.nodes?.length || 0,
+        edges: networkData.edges?.length || 0,
+        products: networkData.products?.length || 0,
+        bom_items: networkData.bom_items?.length || 0,
+        variants: networkData.variants?.length || 0,
+        process_advanced_data: networkData.process_advanced_data ? Object.keys(networkData.process_advanced_data).length : 0
+      });
+      
       setNodes(networkData.nodes || []);
       setEdges(networkData.edges || []);
+      
+      // productsも復元 - networkDataから、またはprojectProductsからフォールバック
+      if (networkData.products && networkData.products.length > 0) {
+        console.log('🔧 Restoring products from networkData:', networkData.products.length);
+        setProducts(networkData.products);
+      } else if (projectProducts && projectProducts.length > 0) {
+        console.log('🔧 Fallback: using projectProducts:', projectProducts.length);
+        setProducts(projectProducts);
+      } else {
+        console.log('🔧 No products available from networkData or projectProducts');
+      }
       
       // process_advanced_dataを復元
       if (networkData.process_advanced_data) {
@@ -163,8 +189,11 @@ const NetworkEditor = () => {
         setProcessAdvancedData(restoredProcessData);
         console.log('Restored process_advanced_data size:', restoredProcessData.size);
       }
+    } else {
+      console.log('🔧 NetworkEditor - networkData is null/undefined');
     }
-  }, [networkData]);
+  }, [networkData, projectProducts]);
+
 
   // processAdvancedDataの変更を監視し、材料設定の変更があった場合に永続化
   useEffect(() => {
@@ -348,9 +377,9 @@ const NetworkEditor = () => {
           batchSize: 1,
           minBatchSize: 1,
           maxBatchSize: 100,
-          defectRate: nodeData.defectRate,
-          reworkRate: nodeData.reworkRate,
-          operatingCost: nodeData.operatingCost,
+          defectRate: nodeData.qualitySettings?.defectRate || 0,
+          reworkRate: nodeData.qualitySettings?.reworkRate || 0,
+          operatingCost: 0, // 削除されたパラメータ
           qualityCheckpoints: [],
           skillRequirements: [],
           toolRequirements: [],
@@ -390,6 +419,14 @@ const NetworkEditor = () => {
 
   // 生産管理データ（部品編集ページのデータを使用）
   const [products, setProducts] = useState<Product[]>([]);
+
+  // projectProductsの変更を監視（部品編集から戻ったときなど）
+  useEffect(() => {
+    if (projectProducts && projectProducts.length > 0 && products.length === 0) {
+      console.log('🔧 Updating products from projectProducts:', projectProducts.length);
+      setProducts(projectProducts);
+    }
+  }, [projectProducts, products.length]);
 
   const [advancedProcessDialogOpen, setAdvancedProcessDialogOpen] = useState(false);
   const [selectedAdvancedProcess, setSelectedAdvancedProcess] = useState<AdvancedProcessData | null>(null);
@@ -444,9 +481,9 @@ const NetworkEditor = () => {
             batchSize: 1,
             minBatchSize: 1,
             maxBatchSize: 100,
-            defectRate: contextMenuNode.data.defectRate,
-            reworkRate: contextMenuNode.data.reworkRate,
-            operatingCost: contextMenuNode.data.operatingCost,
+            defectRate: contextMenuNode.data.qualitySettings?.defectRate || 0,
+            reworkRate: contextMenuNode.data.qualitySettings?.reworkRate || 0,
+            operatingCost: 0, // 削除されたパラメータ
             qualityCheckpoints: [],
             skillRequirements: [],
             toolRequirements: [],
@@ -479,9 +516,9 @@ const NetworkEditor = () => {
             batchSize: 1,
             minBatchSize: 1,
             maxBatchSize: 100,
-            defectRate: contextMenuNode.data.defectRate,
-            reworkRate: contextMenuNode.data.reworkRate,
-            operatingCost: contextMenuNode.data.operatingCost,
+            defectRate: contextMenuNode.data.qualitySettings?.defectRate || 0,
+            reworkRate: contextMenuNode.data.qualitySettings?.reworkRate || 0,
+            operatingCost: 0, // 削除されたパラメータ
             qualityCheckpoints: [],
             skillRequirements: [],
             toolRequirements: [],
@@ -819,9 +856,9 @@ const NetworkEditor = () => {
           batchSize: 1,
           minBatchSize: 1,
           maxBatchSize: 100,
-          defectRate: targetNode.data.defectRate,
-          reworkRate: targetNode.data.reworkRate,
-          operatingCost: targetNode.data.operatingCost,
+          defectRate: targetNode.data.qualitySettings?.defectRate || 0,
+          reworkRate: targetNode.data.qualitySettings?.reworkRate || 0,
+          operatingCost: 0, // 削除されたパラメータ
           qualityCheckpoints: [],
           skillRequirements: [],
           toolRequirements: [],
@@ -903,6 +940,16 @@ const NetworkEditor = () => {
             maxInventory: 50,
             supplierLeadTime: 3,
             kanbanType: 'production' as const
+          },
+          // ロットサイズベースのバッファー設定
+          bufferSettings: {
+            enabled: true as const,
+            initialStock: 0,
+            safetyStock: 0,
+            maxLots: 5,
+            bufferType: 'input' as const,
+            location: 'line_side',
+            notes: 'Auto-generated from preceding output'
           }
         };
         
@@ -1108,9 +1155,9 @@ const NetworkEditor = () => {
                 batchSize: 1,
                 minBatchSize: 1,
                 maxBatchSize: 100,
-                defectRate: sourceNode.data.defectRate,
-                reworkRate: sourceNode.data.reworkRate,
-                operatingCost: sourceNode.data.operatingCost,
+                defectRate: sourceNode.data.qualitySettings?.defectRate || 0,
+                reworkRate: sourceNode.data.qualitySettings?.reworkRate || 0,
+                operatingCost: 0, // 削除されたパラメータ
                 qualityCheckpoints: [],
                 skillRequirements: [],
                 toolRequirements: [],
@@ -1148,9 +1195,9 @@ const NetworkEditor = () => {
                 batchSize: 1,
                 minBatchSize: 1,
                 maxBatchSize: 100,
-                defectRate: targetNode.data.defectRate,
-                reworkRate: targetNode.data.reworkRate,
-                operatingCost: targetNode.data.operatingCost,
+                defectRate: targetNode.data.qualitySettings?.defectRate || 0,
+                reworkRate: targetNode.data.qualitySettings?.reworkRate || 0,
+                operatingCost: 0, // 削除されたパラメータ
                 qualityCheckpoints: [],
                 skillRequirements: [],
                 toolRequirements: [],
@@ -1314,9 +1361,9 @@ const NetworkEditor = () => {
             batchSize: 1,
             minBatchSize: 1,
             maxBatchSize: 100,
-            defectRate: data.defectRate,
-            reworkRate: data.reworkRate,
-            operatingCost: data.operatingCost,
+            defectRate: data.qualitySettings?.defectRate || 0,
+            reworkRate: data.qualitySettings?.reworkRate || 0,
+            operatingCost: 0, // 削除されたパラメータ
             qualityCheckpoints: [],
             skillRequirements: [],
             toolRequirements: [],
@@ -1455,11 +1502,13 @@ const NetworkEditor = () => {
         operatorCount: 1,
         cycleTime: 60,
         setupTime: 300,
-        inputBufferCapacity: 50,
-        outputBufferCapacity: 100,
-        defectRate: 2.0,
-        reworkRate: 1.0,
-        operatingCost: 120,
+        qualitySettings: {
+          defectRate: 2.0,
+          reworkRate: 1.0,
+          scrapRate: 0.5,
+          inspectionTime: 30,
+          inspectionCapacity: 60,
+        },
         inputs: [],
         outputs: ['prod_steel'],
       },
@@ -1470,8 +1519,6 @@ const NetworkEditor = () => {
         operatorCount: 2,
         cycleTime: 120,
         setupTime: 600,
-        inputBufferCapacity: 30,
-        outputBufferCapacity: 50,
         defectRate: 1.0,
         reworkRate: 0.5,
         operatingCost: 150,
@@ -1485,8 +1532,6 @@ const NetworkEditor = () => {
         operatorCount: 1,
         cycleTime: 30,
         setupTime: 180,
-        inputBufferCapacity: 20,
-        outputBufferCapacity: 20,
         defectRate: 0.5,
         reworkRate: 10.0,
         operatingCost: 80,
@@ -1500,8 +1545,6 @@ const NetworkEditor = () => {
         operatorCount: 0,
         cycleTime: 5,
         setupTime: 0,
-        inputBufferCapacity: 1000,
-        outputBufferCapacity: 1000,
         defectRate: 0,
         reworkRate: 0,
         operatingCost: 10,
@@ -1516,8 +1559,7 @@ const NetworkEditor = () => {
         operatorCount: 0,
         cycleTime: 5,
         setupTime: 0,
-        inputBufferCapacity: 1000,
-        outputBufferCapacity: 0, // 最後の工程なので出力は不要
+        // 最後の工程（出荷） - バッファは材料設定で管理
         defectRate: 0,
         reworkRate: 0,
         operatingCost: 10,
@@ -1883,6 +1925,7 @@ const NetworkEditor = () => {
                           setSimulationPanelOpen(true);
                           setAnalysisPanelOpen(false);
                           setValidationPanelOpen(false);
+                          setMaterialBalancePanelOpen(false);
                         }
                       }}
                       sx={{
@@ -1906,6 +1949,7 @@ const NetworkEditor = () => {
                           setAnalysisPanelOpen(true);
                           setValidationPanelOpen(false);
                           setSimulationPanelOpen(false);
+                          setMaterialBalancePanelOpen(false);
                         }
                       }}
                       sx={{
@@ -1928,6 +1972,7 @@ const NetworkEditor = () => {
                           setValidationPanelOpen(true);
                           setAnalysisPanelOpen(false);
                           setSimulationPanelOpen(false);
+                          setMaterialBalancePanelOpen(false);
                         }
                       }}
                       sx={{
@@ -1936,6 +1981,29 @@ const NetworkEditor = () => {
                       }}
                     >
                       <ValidateIcon />
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title="材料バランス検証パネル">
+                    <IconButton 
+                      size="small" 
+                      onClick={() => {
+                        if (materialBalancePanelOpen && activePanel === 'materialBalance') {
+                          setMaterialBalancePanelOpen(false);
+                          setActivePanel(null);
+                        } else {
+                          setActivePanel('materialBalance');
+                          setMaterialBalancePanelOpen(true);
+                          setAnalysisPanelOpen(false);
+                          setValidationPanelOpen(false);
+                          setSimulationPanelOpen(false);
+                        }
+                      }}
+                      sx={{
+                        color: activePanel === 'materialBalance' ? 'primary.main' : 'default',
+                        backgroundColor: activePanel === 'materialBalance' ? 'primary.light' : 'transparent'
+                      }}
+                    >
+                      <MaterialBalanceIcon />
                     </IconButton>
                   </Tooltip>
 
@@ -2035,7 +2103,7 @@ const NetworkEditor = () => {
               <Typography variant="h6">
                 {activePanel === 'analysis' && 'IE分析'}
                 {activePanel === 'validation' && 'ネットワーク検証'}
-
+                {activePanel === 'materialBalance' && '材料バランス検証'}
                 {activePanel === 'simulation' && 'シミュレーション設定'}
               </Typography>
               <Box sx={{ display: 'flex', gap: 1 }}>
@@ -2049,6 +2117,7 @@ const NetworkEditor = () => {
                         setAnalysisPanelOpen(true);
                         setValidationPanelOpen(false);
                         setSimulationPanelOpen(false);
+                        setMaterialBalancePanelOpen(false);
                       }
                     }} 
                     size="small"
@@ -2067,12 +2136,32 @@ const NetworkEditor = () => {
                         setValidationPanelOpen(true);
                         setAnalysisPanelOpen(false);
                         setSimulationPanelOpen(false);
+                        setMaterialBalancePanelOpen(false);
                       }
                     }} 
                     size="small"
                     color={activePanel === 'validation' ? 'primary' : 'default'}
                   >
                     <ValidateIcon />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title="材料バランス検証">
+                  <IconButton 
+                    onClick={() => {
+                      if (activePanel === 'materialBalance' && materialBalancePanelOpen) {
+                        setMaterialBalancePanelOpen(false);
+                      } else {
+                        setActivePanel('materialBalance');
+                        setMaterialBalancePanelOpen(true);
+                        setAnalysisPanelOpen(false);
+                        setValidationPanelOpen(false);
+                        setSimulationPanelOpen(false);
+                      }
+                    }} 
+                    size="small"
+                    color={activePanel === 'materialBalance' ? 'primary' : 'default'}
+                  >
+                    <MaterialBalanceIcon />
                   </IconButton>
                 </Tooltip>
 
@@ -2086,6 +2175,7 @@ const NetworkEditor = () => {
                         setSimulationPanelOpen(true);
                         setAnalysisPanelOpen(false);
                         setValidationPanelOpen(false);
+                        setMaterialBalancePanelOpen(false);
                       }
                     }} 
                     size="small"
@@ -2125,6 +2215,15 @@ const NetworkEditor = () => {
                   edges={edges} 
                   onHighlightNodes={handleHighlightNodes}
                   onHighlightEdges={handleHighlightEdges}
+                />
+              )}
+              {activePanel === 'materialBalance' && (
+                <MaterialBalancePanel 
+                  nodes={nodes} 
+                  processAdvancedData={processAdvancedData} 
+                  products={products}
+                  bomItems={networkData?.bom_items || []}
+                  components={components || []}
                 />
               )}
 
@@ -2439,7 +2538,14 @@ const NetworkEditor = () => {
           <ProcessMaterialDialog
             open={materialDialogOpen}
             processData={selectedProcessForMaterial}
-            products={products}
+            products={(() => {
+              console.log('🔧 ProcessMaterialDialog products:', {
+                productsLength: products.length,
+                networkDataProducts: networkData?.products?.length || 0,
+                actualProducts: products.map(p => ({ id: p.id, name: p.name, code: p.code }))
+              });
+              return products;
+            })()}
             nodes={nodes}
             edges={edges}
             processAdvancedData={processAdvancedData}
@@ -2461,6 +2567,116 @@ const NetworkEditor = () => {
                 console.log('Saved data:', newMap.get(processData.id));
                 return newMap;
               });
+              
+              // 対応するnodeのdata.inputsとdata.outputsも更新
+              console.log('\n🔥 ===== ProcessMaterialDialog保存実行 =====');
+              console.log('🔥 保存対象ノード:', {
+                processId: processData.id,
+                processLabel: processData.label,
+                processType: processData.type,
+                inputMaterialsLength: processData.inputMaterials?.length || 0,
+                outputProductsLength: processData.outputProducts?.length || 0
+              });
+              console.log('🔥 完全なprocessData:', processData);
+              
+              // inputMaterials と outputProducts の詳細内容もログ出力
+              console.log('🔍 詳細な投入材料分析:');
+              if (processData.inputMaterials && processData.inputMaterials.length > 0) {
+                processData.inputMaterials.forEach((input, idx) => {
+                  console.log(`🔍 InputMaterial ${idx}:`, input);
+                  console.log(`🔍 - materialId: ${input.materialId}`);
+                  console.log(`🔍 - materialName: ${input.materialName}`);
+                  console.log(`🔍 - requiredQuantity: ${input.requiredQuantity}`);
+                  console.log(`🔍 - 全プロパティ:`, Object.keys(input));
+                });
+              } else {
+                console.log('🔍 投入材料なし or undefined');
+              }
+              
+              console.log('🔍 詳細な出力製品分析:');
+              if (processData.outputProducts && processData.outputProducts.length > 0) {
+                processData.outputProducts.forEach((output, idx) => {
+                  console.log(`🔍 OutputProduct ${idx}:`, output);
+                  console.log(`🔍 - productId: ${output.productId}`);
+                  console.log(`🔍 - productName: ${output.productName}`);
+                  console.log(`🔍 - outputQuantity: ${output.outputQuantity}`);
+                  console.log(`🔍 - cycleTime: ${output.cycleTime}`);
+                  console.log(`🔍 - setupTime: ${output.setupTime}`);
+                  console.log(`🔍 - 全プロパティ:`, Object.keys(output));
+                });
+              } else {
+                console.log('🔍 出力製品なし or undefined');
+              }
+              
+              setNodes(currentNodes => 
+                currentNodes.map(node => {
+                  if (node.id === processData.id) {
+                    const updatedNode = {
+                      ...node,
+                      data: {
+                        ...node.data,
+                        inputs: processData.inputMaterials || [],
+                        outputs: processData.outputProducts || [],
+                      }
+                    };
+                    console.log('\n🔄 ===== ノード更新実行 =====');
+                    console.log('🔄 更新対象ノード:', {
+                      nodeId: node.id,
+                      nodeLabel: node.data?.label,
+                      nodeType: node.data?.type,
+                    });
+                    console.log('🔄 更新前後比較:', {
+                      originalInputsLength: node.data?.inputs?.length || 0,
+                      originalOutputsLength: node.data?.outputs?.length || 0,
+                      updatedInputsLength: updatedNode.data.inputs?.length || 0,
+                      updatedOutputsLength: updatedNode.data.outputs?.length || 0,
+                      originalInputs: node.data?.inputs,
+                      originalOutputs: node.data?.outputs,
+                      updatedInputs: updatedNode.data.inputs,
+                      updatedOutputs: updatedNode.data.outputs
+                    });
+                    
+                    // 更新されたinputs/outputsの詳細内容も確認
+                    console.log('🔄 更新後のinputs詳細確認:');
+                    if (updatedNode.data.inputs && updatedNode.data.inputs.length > 0) {
+                      updatedNode.data.inputs.forEach((input: any, idx: number) => {
+                        console.log(`🔄 Node Updated Input ${idx}:`, input);
+                        if (typeof input === 'object') {
+                          console.log(`🔄 - materialName: ${input.materialName}`);
+                          console.log(`🔄 - materialId: ${input.materialId}`);  
+                          console.log(`🔄 - requiredQuantity: ${input.requiredQuantity}`);
+                          console.log(`🔄 - 全プロパティ:`, Object.keys(input));
+                        } else {
+                          console.log(`🔄 - 文字列値: ${input}`);
+                        }
+                      });
+                    } else {
+                      console.log('🔄 更新後inputs: なし or undefined');
+                    }
+                    
+                    console.log('🔄 更新後のoutputs詳細確認:');
+                    if (updatedNode.data.outputs && updatedNode.data.outputs.length > 0) {
+                      updatedNode.data.outputs.forEach((output: any, idx: number) => {
+                        console.log(`🔄 Node Updated Output ${idx}:`, output);
+                        if (typeof output === 'object') {
+                          console.log(`🔄 - productName: ${output.productName}`);
+                          console.log(`🔄 - productId: ${output.productId}`);
+                          console.log(`🔄 - outputQuantity: ${output.outputQuantity}`);
+                          console.log(`🔄 - cycleTime: ${output.cycleTime}`);
+                          console.log(`🔄 - setupTime: ${output.setupTime}`);
+                          console.log(`🔄 - 全プロパティ:`, Object.keys(output));
+                        } else {
+                          console.log(`🔄 - 文字列値: ${output}`);
+                        }
+                      });
+                    } else {
+                      console.log('🔄 更新後outputs: なし or undefined');
+                    }
+                    return updatedNode;
+                  }
+                  return node;
+                })
+              );
               
               // 保存成功の通知（保存処理は確実に完了している）
               console.log('✅ Process material data successfully saved');

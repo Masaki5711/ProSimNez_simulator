@@ -1,355 +1,398 @@
 import React, { useState, useEffect } from 'react';
 import {
   Box,
-  Paper,
-  Typography,
+  Button,
+  Card,
+  CardContent,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Grid,
+  IconButton,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
   TableRow,
-  Button,
-  IconButton,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
   TextField,
-  Select,
-  MenuItem,
+  Typography,
+  Chip,
+  Alert,
   FormControl,
   InputLabel,
-  Chip,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
-
-  Tooltip,
-  Card,
-  CardContent,
-  CardActions,
-  Tab,
-  Tabs,
+  Select,
+  MenuItem,
+  InputAdornment
 } from '@mui/material';
 import {
   Add as AddIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
-  ExpandMore as ExpandMoreIcon,
-  ListAlt as ListIcon,
-  Inventory as MaterialIcon,
-  Settings as VariantIcon,
   Schedule as ScheduleIcon,
+  PriorityHigh as PriorityIcon
 } from '@mui/icons-material';
-import { Product, BOMItem, ProductVariant, MaterialInput, ProductOutput } from '../../types/productionTypes';
-import BOMEditDialog from './BOMEditDialog';
+import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
+import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
+import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import { ja } from 'date-fns/locale';
+import { useSelector, useDispatch } from 'react-redux';
+import { RootState } from '../../store';
 
-interface BOMManagerProps {
-  products: Product[];
-  bomItems: BOMItem[];
-  variants: ProductVariant[];
-  onProductAdd: (product: Product) => void;
-  onProductUpdate: (product: Product) => void;
-  onProductDelete: (productId: string) => void;
-  onBOMUpdate: (bomItems: BOMItem[]) => void;
-  onVariantUpdate: (variants: ProductVariant[]) => void;
+interface ProductionPlan {
+  id: string;
+  product_id: string;
+  quantity: number;
+  due_date: Date;
+  priority: number;
+  customer_id: string;
+  order_type: 'standard' | 'rush' | 'kanban';
+  status: 'pending' | 'scheduled' | 'in_progress' | 'completed';
 }
 
-const BOMManager: React.FC<BOMManagerProps> = ({
-  products,
-  bomItems,
-  variants,
-  onProductAdd,
-  onProductUpdate,
-  onProductDelete,
-  onBOMUpdate,
-  onVariantUpdate,
+interface ProductionPlanDialogProps {
+  open: boolean;
+  onClose: () => void;
+  plan?: ProductionPlan;
+  onSave: (plan: ProductionPlan) => void;
+}
+
+const ProductionPlanDialog: React.FC<ProductionPlanDialogProps> = ({
+  open,
+  onClose,
+  plan,
+  onSave
 }) => {
-  const [activeTab, setActiveTab] = useState(0);
-  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
-  const [productDialogOpen, setProductDialogOpen] = useState(false);
-  const [bomDialogOpen, setBomDialogOpen] = useState(false);
-  const [variantDialogOpen, setVariantDialogOpen] = useState(false);
-  const [editingProduct, setEditingProduct] = useState<Partial<Product>>({});
-  const [editingBomItem, setEditingBomItem] = useState<Partial<BOMItem>>({});
-  const [editingVariant, setEditingVariant] = useState<Partial<ProductVariant>>({});
-  const [bomEditDialogOpen, setBomEditDialogOpen] = useState(false);
-  const [selectedProductForBOM, setSelectedProductForBOM] = useState<Product | null>(null);
+  const [formData, setFormData] = useState<Partial<ProductionPlan>>({
+    product_id: '',
+    quantity: 1,
+    due_date: new Date(),
+    priority: 1,
+    customer_id: '',
+    order_type: 'standard'
+  });
 
-  // 製品の階層構造を構築（循環参照チェック付き）
-  const buildProductHierarchy = (productId: string, visited = new Set<string>()): any => {
-    const product = products.find(p => p.id === productId);
-    if (!product) return null;
+  const { networkData } = useSelector((state: RootState) => state.project);
+  const productList = networkData?.products || [];
 
-    // 循環参照チェック
-    if (visited.has(productId)) {
-      return {
-        product,
-        children: [], // 循環参照の場合は子を空にする
-        isCircular: true,
-      };
-    }
-
-    const newVisited = new Set(visited);
-    newVisited.add(productId);
-
-    const children = bomItems
-      .filter(item => item.parentProductId === productId)
-      .map(item => ({
-        ...item,
-        child: buildProductHierarchy(item.childProductId, newVisited),
-      }));
-
-    return {
-      product,
-      children,
-      isCircular: false,
-    };
-  };
-
-  // 完成品（最上位製品）を取得
-  const getFinishedProducts = () => {
-    const parentIds = new Set(bomItems.map(item => item.parentProductId));
-    const childIds = new Set(bomItems.map(item => item.childProductId));
-    
-    return products.filter(product => 
-      parentIds.has(product.id) && !childIds.has(product.id)
-    );
-  };
-
-  // 製品追加/編集ダイアログ
-  const handleProductSave = () => {
-    if (editingProduct.id) {
-      onProductUpdate(editingProduct as Product);
+  useEffect(() => {
+    if (plan) {
+      setFormData({
+        ...plan,
+        due_date: new Date(plan.due_date)
+      });
     } else {
-      const newProduct: Product = {
-        id: `product_${Date.now()}`,
-        ...editingProduct,
-      } as Product;
-      onProductAdd(newProduct);
+      setFormData({
+        product_id: '',
+        quantity: 1,
+        due_date: new Date(),
+        priority: 1,
+        customer_id: '',
+        order_type: 'standard'
+      });
     }
-    setProductDialogOpen(false);
-    setEditingProduct({});
+  }, [plan]);
+
+  const handleSubmit = () => {
+    if (formData.product_id && formData.due_date) {
+      const newPlan: ProductionPlan = {
+        id: plan?.id || `plan_${Date.now()}`,
+        product_id: formData.product_id,
+        quantity: formData.quantity || 1,
+        due_date: formData.due_date,
+        priority: formData.priority || 1,
+        customer_id: formData.customer_id || '',
+        order_type: formData.order_type || 'standard',
+        status: 'pending'
+      };
+      onSave(newPlan);
+      onClose();
+    }
   };
 
-  // BOM項目追加/編集（旧機能）
-  const handleLegacyBOMSave = () => {
-    const newBomItem: BOMItem = {
-      id: `bom_${Date.now()}`,
-      effectiveDate: new Date().toISOString(),
-      isOptional: false,
-      ...editingBomItem,
-    } as BOMItem;
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
+      <DialogTitle>
+        {plan ? '生産計画の編集' : '新規生産計画の作成'}
+      </DialogTitle>
+      <DialogContent>
+        <Grid container spacing={2} sx={{ mt: 1 }}>
+          <Grid item xs={12} md={6}>
+            <FormControl fullWidth>
+              <InputLabel>製品</InputLabel>
+              <Select
+                value={formData.product_id}
+                onChange={(e) => setFormData({ ...formData, product_id: e.target.value })}
+                label="製品"
+              >
+                {productList.map((product: any) => (
+                  <MenuItem key={product.id} value={product.id}>
+                    {product.name}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <TextField
+              fullWidth
+              label="数量"
+              type="number"
+              value={formData.quantity}
+              onChange={(e) => setFormData({ ...formData, quantity: parseInt(e.target.value) || 1 })}
+              InputProps={{
+                endAdornment: <InputAdornment position="end">個</InputAdornment>
+              }}
+            />
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={ja}>
+              <DateTimePicker
+                label="納期"
+                value={formData.due_date}
+                onChange={(newValue: Date | null) => setFormData({ ...formData, due_date: newValue || new Date() })}
+                slotProps={{
+                  textField: { fullWidth: true }
+                }}
+              />
+            </LocalizationProvider>
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <FormControl fullWidth>
+              <InputLabel>優先度</InputLabel>
+              <Select
+                value={formData.priority}
+                onChange={(e) => setFormData({ ...formData, priority: e.target.value as number })}
+                label="優先度"
+              >
+                <MenuItem value={1}>最高 (1)</MenuItem>
+                <MenuItem value={2}>高 (2)</MenuItem>
+                <MenuItem value={3}>中 (3)</MenuItem>
+                <MenuItem value={4}>低 (4)</MenuItem>
+                <MenuItem value={5}>最低 (5)</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <TextField
+              fullWidth
+              label="顧客ID"
+              value={formData.customer_id}
+              onChange={(e) => setFormData({ ...formData, customer_id: e.target.value })}
+            />
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <FormControl fullWidth>
+              <InputLabel>注文タイプ</InputLabel>
+              <Select
+                value={formData.order_type}
+                onChange={(e) => setFormData({ ...formData, order_type: e.target.value as any })}
+                label="注文タイプ"
+              >
+                <MenuItem value="standard">標準</MenuItem>
+                <MenuItem value="rush">緊急</MenuItem>
+                <MenuItem value="kanban">かんばん</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+        </Grid>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>キャンセル</Button>
+        <Button onClick={handleSubmit} variant="contained" color="primary">
+          保存
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
 
-    const updatedBomItems = editingBomItem.id
-      ? bomItems.map(item => item.id === editingBomItem.id ? newBomItem : item)
-      : [...bomItems, newBomItem];
+const ProductionPlanManager: React.FC = () => {
+  const [plans, setPlans] = useState<ProductionPlan[]>([]);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingPlan, setEditingPlan] = useState<ProductionPlan | undefined>();
+  const [selectedPlan, setSelectedPlan] = useState<ProductionPlan | null>(null);
 
-    onBOMUpdate(updatedBomItems);
-    setBomDialogOpen(false);
-    setEditingBomItem({});
+  const { networkData } = useSelector((state: RootState) => state.project);
+  const productList = networkData?.products || [];
+
+  // 完成品ストアの検出
+  const finishedProductStores = Object.values(networkData?.nodes || {}).filter(
+    (node: any) => node.type === 'store' || node.type === 'shipping'
+  );
+
+  useEffect(() => {
+    // ローカルストレージから生産計画を読み込み
+    const savedPlans = localStorage.getItem('productionPlans');
+    if (savedPlans) {
+      try {
+        const parsedPlans = JSON.parse(savedPlans).map((plan: any) => ({
+          ...plan,
+          due_date: new Date(plan.due_date)
+        }));
+        setPlans(parsedPlans);
+      } catch (error) {
+        console.error('生産計画の読み込みエラー:', error);
+      }
+    }
+  }, []);
+
+  const savePlansToStorage = (newPlans: ProductionPlan[]) => {
+    localStorage.setItem('productionPlans', JSON.stringify(newPlans));
   };
 
-  // 製品バリエーション管理
-  const handleVariantSave = () => {
-    const newVariant: ProductVariant = {
-      id: `variant_${Date.now()}`,
-      bom: [],
-      setupRequirements: [],
-      demand: {
-        dailyDemand: 0,
-        weeklyPattern: [1, 1, 1, 1, 1, 0, 0],
-        seasonality: 1,
-        priority: 'medium',
-        customerOrders: [],
-      },
-      ...editingVariant,
-    } as ProductVariant;
-
-    const updatedVariants = editingVariant.id
-      ? variants.map(v => v.id === editingVariant.id ? newVariant : v)
-      : [...variants, newVariant];
-
-    onVariantUpdate(updatedVariants);
-    setVariantDialogOpen(false);
-    setEditingVariant({});
+  const handleSavePlan = (plan: ProductionPlan) => {
+    if (editingPlan) {
+      // 編集
+      const updatedPlans = plans.map(p => p.id === plan.id ? plan : p);
+      setPlans(updatedPlans);
+      savePlansToStorage(updatedPlans);
+    } else {
+      // 新規作成
+      const newPlans = [...plans, plan];
+      setPlans(newPlans);
+      savePlansToStorage(newPlans);
+    }
+    setEditingPlan(undefined);
   };
 
-  // BOM編集保存
-  const handleBOMSave = (productId: string, newBomItems: BOMItem[]) => {
-    // 既存のBOM項目を削除し、新しい項目に置き換え
-    const otherBomItems = bomItems.filter(item => item.parentProductId !== productId);
-    const updatedBomItems = [...otherBomItems, ...newBomItems];
-    onBOMUpdate(updatedBomItems);
-    setBomEditDialogOpen(false);
-    setSelectedProductForBOM(null);
+  const handleEditPlan = (plan: ProductionPlan) => {
+    setEditingPlan(plan);
+    setDialogOpen(true);
   };
 
-  // BOM編集ダイアログを開く
-  const openBOMEdit = (product: Product) => {
-    setSelectedProductForBOM(product);
-    setBomEditDialogOpen(true);
+  const handleDeletePlan = (planId: string) => {
+    const updatedPlans = plans.filter(p => p.id !== planId);
+    setPlans(updatedPlans);
+    savePlansToStorage(updatedPlans);
   };
 
-  // 製品ツリー表示コンポーネント（メモ化）
-  const ProductTree: React.FC<{ hierarchy: any; level: number }> = React.memo(({ hierarchy, level }) => {
-    if (!hierarchy) return null;
+  const getPriorityColor = (priority: number) => {
+    switch (priority) {
+      case 1: return 'error';
+      case 2: return 'warning';
+      case 3: return 'info';
+      case 4: return 'default';
+      case 5: return 'default';
+      default: return 'default';
+    }
+  };
 
-    const indent = level * 20;
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'pending': return 'warning';
+      case 'scheduled': return 'info';
+      case 'in_progress': return 'primary';
+      case 'completed': return 'success';
+      default: return 'default';
+    }
+  };
+
+  const getStatusText = (status: string) => {
+    switch (status) {
+      case 'pending': return '待機中';
+      case 'scheduled': return 'スケジュール済み';
+      case 'in_progress': return '実行中';
+      case 'completed': return '完了';
+      default: return status;
+    }
+  };
 
     return (
       <Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, ml: `${indent}px`, p: 1 }}>
-          <MaterialIcon color={hierarchy.product.type === 'finished_product' ? 'primary' : 'action'} />
-          <Typography variant="body2">
-            {hierarchy.product.name} ({hierarchy.product.code})
-          </Typography>
-          <Chip
-            label={hierarchy.product.type}
-            size="small"
-            color={hierarchy.product.type === 'finished_product' ? 'primary' : 'default'}
-          />
-          <IconButton
-            size="small"
-            onClick={() => openBOMEdit(hierarchy.product)}
-            sx={{ ml: 1 }}
-          >
-            <EditIcon fontSize="small" />
-          </IconButton>
-        </Box>
-        {hierarchy.children?.map((child: any) => {
-          const childProduct = products.find(p => p.id === child.childProductId);
-          return (
-            <Box key={child.id}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, ml: `${indent + 40}px`, p: 1 }}>
-                <MaterialIcon color="action" />
-                <Typography variant="body2">
-                  {childProduct?.name} × {child.quantity} {child.unit}
-                </Typography>
-                {child.isOptional && <Chip label="オプション" size="small" color="warning" />}
-              </Box>
-              {child.child && <ProductTree hierarchy={child.child} level={level + 1} />}
-            </Box>
-          );
-        })}
-      </Box>
-    );
-  });
-
-  // React DevToolsでの表示名を設定
-  ProductTree.displayName = 'ProductTree';
-
-  return (
-    <Box sx={{ width: '100%' }}>
-      <Paper sx={{ p: 2 }}>
-        <Typography variant="h5" gutterBottom>
-          BOM・製品管理
+      <Card>
+        <CardContent>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <Typography variant="h6" component="h2">
+              生産計画管理
         </Typography>
-
-        {/* タブナビゲーション */}
-        <Tabs value={activeTab} onChange={(e, newValue) => setActiveTab(newValue)} sx={{ mb: 2 }}>
-          <Tab icon={<MaterialIcon />} label="BOM構造" />
-          <Tab icon={<ListIcon />} label="製品一覧" />
-          <Tab icon={<VariantIcon />} label="製品バリエーション" />
-          <Tab icon={<MaterialIcon />} label="材料・部品" />
-        </Tabs>
-
-        {/* BOM構造表示タブ */}
-        {activeTab === 0 && (
-          <Box>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
-              <Typography variant="h6">製品構造ツリー</Typography>
               <Button
                 variant="contained"
                 startIcon={<AddIcon />}
                 onClick={() => {
-                  setEditingBomItem({});
-                  setBomDialogOpen(true);
+                setEditingPlan(undefined);
+                setDialogOpen(true);
                 }}
               >
-                BOM項目追加
+              新規計画作成
               </Button>
             </Box>
 
-            <Paper sx={{ p: 2, minHeight: 300 }}>
-              {getFinishedProducts().length > 0 ? (
-                getFinishedProducts().map(product => (
-                  <ProductTree
-                    key={product.id}
-                    hierarchy={buildProductHierarchy(product.id)}
-                    level={0}
-                  />
-                ))
-              ) : (
-                <Typography variant="body2" color="textSecondary" sx={{ p: 2, textAlign: 'center' }}>
-                  まだ製品が登録されていません。「製品追加」ボタンから製品を登録してください。
-                </Typography>
-              )}
-            </Paper>
-          </Box>
-        )}
+          {finishedProductStores.length === 0 && (
+            <Alert severity="warning" sx={{ mb: 2 }}>
+              完成品ストアが設定されていません。ネットワークエディタで完成品ストア（store/shipping）を追加してください。
+            </Alert>
+          )}
 
-        {/* 製品一覧タブ */}
-        {activeTab === 1 && (
-          <Box>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
-              <Typography variant="h6">製品一覧</Typography>
-              <Button
-                variant="contained"
-                startIcon={<AddIcon />}
-                onClick={() => {
-                  setEditingProduct({});
-                  setProductDialogOpen(true);
-                }}
-              >
-                製品追加
-              </Button>
+          {plans.length === 0 ? (
+            <Box sx={{ textAlign: 'center', py: 4 }}>
+              <Typography color="text.secondary">
+                生産計画がありません。新規計画を作成してください。
+              </Typography>
             </Box>
-
-            <TableContainer component={Paper}>
+          ) : (
+            <TableContainer>
               <Table>
                 <TableHead>
                   <TableRow>
-                    <TableCell>製品名</TableCell>
-                    <TableCell>製品コード</TableCell>
-                    <TableCell>タイプ</TableCell>
-                    <TableCell>単価</TableCell>
-                    <TableCell>リードタイム</TableCell>
-                    <TableCell>アクション</TableCell>
+                    <TableCell>製品</TableCell>
+                    <TableCell align="right">数量</TableCell>
+                    <TableCell>納期</TableCell>
+                    <TableCell>優先度</TableCell>
+                    <TableCell>顧客ID</TableCell>
+                    <TableCell>注文タイプ</TableCell>
+                    <TableCell>状態</TableCell>
+                    <TableCell align="center">操作</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {products.map((product) => (
-                    <TableRow key={product.id}>
-                      <TableCell>{product.name}</TableCell>
-                      <TableCell>{product.code}</TableCell>
+                  {plans.map((plan) => (
+                    <TableRow key={plan.id} hover>
+                      <TableCell>{plan.product_id}</TableCell>
+                      <TableCell align="right">{plan.quantity}個</TableCell>
                       <TableCell>
-                        <Chip label={product.type} size="small" />
+                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                          <ScheduleIcon sx={{ mr: 1, fontSize: 'small' }} />
+                          {plan.due_date.toLocaleString('ja-JP')}
+                        </Box>
                       </TableCell>
-                      <TableCell>¥{product.unitCost.toLocaleString()}</TableCell>
-                      <TableCell>{product.leadTime}日</TableCell>
                       <TableCell>
+                        <Chip
+                          label={`優先度 ${plan.priority}`}
+                          color={getPriorityColor(plan.priority) as any}
+                          size="small"
+                          icon={<PriorityIcon />}
+                        />
+                      </TableCell>
+                      <TableCell>{plan.customer_id || '-'}</TableCell>
+                      <TableCell>
+                        <Chip
+                          label={plan.order_type === 'standard' ? '標準' : 
+                                 plan.order_type === 'rush' ? '緊急' : 'かんばん'}
+                          size="small"
+                          variant="outlined"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Chip
+                          label={getStatusText(plan.status)}
+                          color={getStatusColor(plan.status) as any}
+                          size="small"
+                        />
+                      </TableCell>
+                      <TableCell align="center">
                         <IconButton
-                          onClick={() => {
-                            setEditingProduct(product);
-                            setProductDialogOpen(true);
-                          }}
-                          title="製品編集"
+                          size="small"
+                          onClick={() => handleEditPlan(plan)}
+                          color="primary"
                         >
                           <EditIcon />
                         </IconButton>
                         <IconButton
-                          onClick={() => openBOMEdit(product)}
-                          color="primary"
-                          title="BOM編集"
-                        >
-                          <MaterialIcon />
-                        </IconButton>
-                        <IconButton
-                          onClick={() => onProductDelete(product.id)}
+                          size="small"
+                          onClick={() => handleDeletePlan(plan.id)}
                           color="error"
-                          title="削除"
                         >
                           <DeleteIcon />
                         </IconButton>
@@ -359,295 +402,21 @@ const BOMManager: React.FC<BOMManagerProps> = ({
                 </TableBody>
               </Table>
             </TableContainer>
-          </Box>
-        )}
-
-        {/* 製品バリエーションタブ */}
-        {activeTab === 2 && (
-          <Box>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
-              <Typography variant="h6">製品バリエーション</Typography>
-              <Button
-                variant="contained"
-                startIcon={<AddIcon />}
-                onClick={() => {
-                  setEditingVariant({});
-                  setVariantDialogOpen(true);
-                }}
-              >
-                バリエーション追加
-              </Button>
-            </Box>
-
-            <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 2 }}>
-              {variants.map((variant) => (
-                <Card key={variant.id}>
-                  <CardContent>
-                    <Typography variant="h6" gutterBottom>
-                      {variant.variantName}
-                    </Typography>
-                    <Typography variant="body2" color="textSecondary" gutterBottom>
-                      コード: {variant.variantCode}
-                    </Typography>
-                    <Typography variant="body2">
-                      ベース製品: {products.find(p => p.id === variant.baseProductId)?.name}
-                    </Typography>
-                    <Typography variant="body2">
-                      日次需要: {variant.demand.dailyDemand}個
-                    </Typography>
-                    <Typography variant="body2">
-                      優先度: {variant.demand.priority}
-                    </Typography>
+          )}
                   </CardContent>
-                  <CardActions>
-                    <Button
-                      size="small"
-                      startIcon={<EditIcon />}
-                      onClick={() => {
-                        setEditingVariant(variant);
-                        setVariantDialogOpen(true);
-                      }}
-                    >
-                      編集
-                    </Button>
-                    <Button
-                      size="small"
-                      startIcon={<ScheduleIcon />}
-                      onClick={() => {
-                        // スケジュール機能（今後実装）
-                      }}
-                    >
-                      スケジュール
-                    </Button>
-                  </CardActions>
                 </Card>
-              ))}
-            </Box>
-          </Box>
-        )}
 
-        {/* 材料・部品タブ */}
-        {activeTab === 3 && (
-          <Box>
-            <Typography variant="h6" gutterBottom>
-              材料・部品一覧
-            </Typography>
-            <TableContainer component={Paper}>
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>部品名</TableCell>
-                    <TableCell>部品コード</TableCell>
-                    <TableCell>タイプ</TableCell>
-                    <TableCell>サプライヤー</TableCell>
-                    <TableCell>在庫状況</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {products
-                    .filter(p => p.type === 'raw_material' || p.type === 'component')
-                    .map((product) => (
-                    <TableRow key={product.id}>
-                      <TableCell>{product.name}</TableCell>
-                      <TableCell>{product.code}</TableCell>
-                      <TableCell>
-                        <Chip label={product.type} size="small" />
-                      </TableCell>
-                      <TableCell>{product.supplier || 'N/A'}</TableCell>
-                      <TableCell>
-                        <Chip label="在庫あり" color="success" size="small" />
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </Box>
-        )}
-      </Paper>
-
-      {/* 製品追加/編集ダイアログ */}
-      <Dialog open={productDialogOpen} onClose={() => setProductDialogOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>
-          {editingProduct.id ? '製品編集' : '製品追加'}
-        </DialogTitle>
-        <DialogContent>
-          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mt: 1 }}>
-            <TextField
-              label="製品名"
-              value={editingProduct.name || ''}
-              onChange={(e) => setEditingProduct({ ...editingProduct, name: e.target.value })}
-              fullWidth
-            />
-            <TextField
-              label="製品コード"
-              value={editingProduct.code || ''}
-              onChange={(e) => setEditingProduct({ ...editingProduct, code: e.target.value })}
-              fullWidth
-            />
-            <FormControl fullWidth>
-              <InputLabel>製品タイプ</InputLabel>
-              <Select
-                value={editingProduct.type || ''}
-                onChange={(e) => setEditingProduct({ ...editingProduct, type: e.target.value as any })}
-              >
-                <MenuItem value="raw_material">原材料</MenuItem>
-                <MenuItem value="component">部品</MenuItem>
-                <MenuItem value="sub_assembly">サブアッセンブリ</MenuItem>
-                <MenuItem value="finished_product">完成品</MenuItem>
-              </Select>
-            </FormControl>
-            <TextField
-              label="単価"
-              type="number"
-              value={editingProduct.unitCost || ''}
-              onChange={(e) => setEditingProduct({ ...editingProduct, unitCost: Number(e.target.value) })}
-              fullWidth
-            />
-            <TextField
-              label="リードタイム（日）"
-              type="number"
-              value={editingProduct.leadTime || ''}
-              onChange={(e) => setEditingProduct({ ...editingProduct, leadTime: Number(e.target.value) })}
-              fullWidth
-            />
-            <TextField
-              label="サプライヤー"
-              value={editingProduct.supplier || ''}
-              onChange={(e) => setEditingProduct({ ...editingProduct, supplier: e.target.value })}
-              fullWidth
-            />
-            <TextField
-              label="説明"
-              value={editingProduct.description || ''}
-              onChange={(e) => setEditingProduct({ ...editingProduct, description: e.target.value })}
-              fullWidth
-              multiline
-              rows={3}
-              sx={{ gridColumn: '1 / -1' }}
-            />
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setProductDialogOpen(false)}>キャンセル</Button>
-          <Button onClick={handleProductSave} variant="contained">保存</Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* BOM項目追加/編集ダイアログ */}
-      <Dialog open={bomDialogOpen} onClose={() => setBomDialogOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>BOM項目追加</DialogTitle>
-        <DialogContent>
-          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mt: 1 }}>
-            <FormControl fullWidth>
-              <InputLabel>親製品</InputLabel>
-              <Select
-                value={editingBomItem.parentProductId || ''}
-                onChange={(e) => setEditingBomItem({ ...editingBomItem, parentProductId: e.target.value })}
-              >
-                {products.map((product) => (
-                  <MenuItem key={product.id} value={product.id}>
-                    {product.name} ({product.code})
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <FormControl fullWidth>
-              <InputLabel>子部品</InputLabel>
-              <Select
-                value={editingBomItem.childProductId || ''}
-                onChange={(e) => setEditingBomItem({ ...editingBomItem, childProductId: e.target.value })}
-              >
-                {products.map((product) => (
-                  <MenuItem key={product.id} value={product.id}>
-                    {product.name} ({product.code})
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <TextField
-              label="使用数量"
-              type="number"
-              value={editingBomItem.quantity || ''}
-              onChange={(e) => setEditingBomItem({ ...editingBomItem, quantity: Number(e.target.value) })}
-              fullWidth
-            />
-            <TextField
-              label="単位"
-              value={editingBomItem.unit || ''}
-              onChange={(e) => setEditingBomItem({ ...editingBomItem, unit: e.target.value })}
-              fullWidth
-            />
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setBomDialogOpen(false)}>キャンセル</Button>
-          <Button onClick={handleLegacyBOMSave} variant="contained">保存</Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* バリエーション追加/編集ダイアログ */}
-      <Dialog open={variantDialogOpen} onClose={() => setVariantDialogOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>製品バリエーション追加</DialogTitle>
-        <DialogContent>
-          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mt: 1 }}>
-            <TextField
-              label="バリエーション名"
-              value={editingVariant.variantName || ''}
-              onChange={(e) => setEditingVariant({ ...editingVariant, variantName: e.target.value })}
-              fullWidth
-            />
-            <TextField
-              label="バリエーションコード"
-              value={editingVariant.variantCode || ''}
-              onChange={(e) => setEditingVariant({ ...editingVariant, variantCode: e.target.value })}
-              fullWidth
-            />
-            <FormControl fullWidth>
-              <InputLabel>ベース製品</InputLabel>
-              <Select
-                value={editingVariant.baseProductId || ''}
-                onChange={(e) => setEditingVariant({ ...editingVariant, baseProductId: e.target.value })}
-              >
-                {products.map((product) => (
-                  <MenuItem key={product.id} value={product.id}>
-                    {product.name} ({product.code})
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <TextField
-              label="日次需要"
-              type="number"
-              value={editingVariant.demand?.dailyDemand || ''}
-              onChange={(e) => setEditingVariant({
-                ...editingVariant,
-                demand: { ...editingVariant.demand, dailyDemand: Number(e.target.value) } as any
-              })}
-              fullWidth
-            />
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setVariantDialogOpen(false)}>キャンセル</Button>
-          <Button onClick={handleVariantSave} variant="contained">保存</Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* BOM編集ダイアログ */}
-      <BOMEditDialog
-        open={bomEditDialogOpen}
-        product={selectedProductForBOM}
-        bomItems={bomItems}
-        products={products}
+      <ProductionPlanDialog
+        open={dialogOpen}
         onClose={() => {
-          setBomEditDialogOpen(false);
-          setSelectedProductForBOM(null);
+          setDialogOpen(false);
+          setEditingPlan(undefined);
         }}
-        onSave={handleBOMSave}
+        plan={editingPlan}
+        onSave={handleSavePlan}
       />
     </Box>
   );
 };
 
-export default BOMManager;
+export default ProductionPlanManager;

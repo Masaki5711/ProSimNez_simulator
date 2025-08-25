@@ -232,14 +232,14 @@ export interface MaterialInput {
     kanbanType: 'production' | 'withdrawal' | 'supplier';
   };
   
-  // 部品ごとの初期バッファー設定
-  initialBufferSettings?: {
-    enabled: boolean;
+  // 部品ごとのバッファー設定（ロットサイズベース）
+  bufferSettings: {
+    enabled: true;             // 常に有効
     inputBufferId?: string;    // 入力バッファーID
     outputBufferId?: string;   // 出力バッファーID
-    initialStock: number;      // 初期在庫数
-    safetyStock: number;       // 安全在庫数
-    maxCapacity: number;       // 最大容量
+    initialStock: number;      // 初期在庫数（ロットサイズの倍数または0）
+    safetyStock: number;       // 安全在庫数（ロットサイズの倍数）
+    maxLots: number;           // 最大ロット数（容量はlotSize * maxLots）
     bufferType: 'input' | 'output' | 'both'; // バッファータイプ
     location?: string;         // バッファー位置
     notes?: string;            // 備考
@@ -256,7 +256,20 @@ export interface ProductOutput {
   unit: string;
   qualityLevel: string;
   setupTime: number; // 段取り時間（分）
+  cycleTime: number; // サイクルタイム（秒）
   packagingSpec?: PackagingSpecification;
+  
+  // 出力製品ごとのバッファー設定（ロットサイズベース）
+  bufferSettings: {
+    enabled: true;                 // 常に有効
+    outputBufferId?: string;       // 出力バッファーID
+    initialStock: number;          // 初期在庫数（ロットサイズの倍数または0）
+    safetyStock: number;           // 安全在庫数（ロットサイズの倍数）
+    maxLots: number;               // 最大ロット数（容量はlotSize * maxLots）
+    bufferType: 'output' | 'both'; // バッファータイプ（出力は'output'または'both'のみ）
+    location?: string;             // バッファー位置
+    notes?: string;                // 備考
+  };
 }
 
 /**
@@ -386,6 +399,40 @@ export interface ProductionSchedule {
   status: 'planned' | 'in_progress' | 'completed' | 'delayed' | 'cancelled';
   dependencies: string[]; // 依存する他のスケジュールID
   resources: ResourceAllocation[];
+}
+
+/**
+ * ストア用の生産スケジュール（簡易版）
+ */
+export interface StoreProductionSchedule {
+  id: string;
+  productId: string;
+  productName: string;
+  quantity: number;
+  unit: string;
+  priority: number;
+  sequence: number; // 製造順序
+  startTime?: string; // 開始時刻（HH:MM形式）
+  endTime?: string;   // 終了時刻（HH:MM形式）
+  isActive: boolean;
+  plannedStartTime?: Date;
+  plannedEndTime?: Date;
+  status: 'planned' | 'in_progress' | 'completed' | 'delayed' | 'cancelled';
+}
+
+/**
+ * ストアスケジュール用の生産スケジュール（StoreScheduleDialog用）
+ */
+export interface StoreScheduleProductionSchedule {
+  id: string;
+  productId: string;
+  productName: string;
+  targetQuantity: number;
+  startTime: string;
+  endTime: string;
+  priority: 'low' | 'medium' | 'high';
+  shiftPattern: 'day_shift' | 'night_shift' | 'flexible';
+  demandPattern: 'constant' | 'variable' | 'seasonal';
 }
 
 /**
