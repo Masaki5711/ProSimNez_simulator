@@ -215,6 +215,7 @@ export interface MaterialInput {
   isDefective?: boolean; // 不良品かどうか
   qualityGrade?: string; // 品質グレード
   originalProductId?: string; // 元製品ID（不良品の場合）
+  _isPlaceholder?: boolean; // プレースホルダーフラグ（データ読み込み中）
   
   // 部品ごとのスケジューリング設定
   schedulingMode: 'push' | 'pull' | 'hybrid';
@@ -258,6 +259,7 @@ export interface ProductOutput {
   setupTime: number; // 段取り時間（分）
   cycleTime: number; // サイクルタイム（秒）
   packagingSpec?: PackagingSpecification;
+  _isPlaceholder?: boolean; // プレースホルダーフラグ（データ読み込み中）
   
   // 出力製品ごとのバッファー設定（ロットサイズベース）
   bufferSettings: {

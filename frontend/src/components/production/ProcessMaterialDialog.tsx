@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -103,6 +103,28 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
   });
 
   console.log('🔍 newMaterial 初期化:', newMaterial);
+  console.log('🔍 ProcessMaterialDialog 初期化時の製品データ状態:', {
+    productsCount: products.length,
+    products: products.map(p => ({ id: p.id, name: p.name, type: p.type })),
+    processDataId: processData?.id,
+    processDataLabel: processData?.label,
+    nodesCount: nodes.length,
+    edgesCount: edges.length,
+    processAdvancedDataSize: processAdvancedData.size
+  });
+
+  // 製品データが空の場合の警告
+  if (products.length === 0) {
+    console.warn('⚠️ ProcessMaterialDialog: 製品データが空です！', {
+      propsReceived: {
+        productsLength: products.length,
+        nodesLength: nodes.length,
+        edgesLength: edges.length,
+        processData: processData ? { id: processData.id, label: processData.label } : null
+      },
+      timestamp: new Date().toISOString()
+    });
+  }
   const [newOutput, setNewOutput] = useState<Partial<ProductOutput>>({
     outputQuantity: 1,
     unit: '個',
@@ -159,7 +181,7 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
   }, [processData, edges, nodes, processAdvancedData]);
 
   // 前工程の出力製品を取得する関数
-  const getPrecedingOutputProducts = useCallback(() => {
+  const getPrecedingOutputProducts = useMemo(() => {
     const precedingProcesses = getPrecedingProcesses();
     const outputProducts: any[] = [];
     
@@ -185,7 +207,17 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
             });
             console.log(`✅ 出力製品追加: ${product.name} (${process.name})`);
           } else {
-            console.log(`⚠️ 製品が見つかりません: ${output.productId}`);
+            // 製品データが読み込まれていない場合の詳細ログ
+            console.log(`⚠️ 製品が見つかりません: ${output.productId}`, {
+              productsCount: products.length,
+              availableProductIds: products.map(p => p.id),
+              availableProductNames: products.map(p => ({ id: p.id, name: p.name })),
+              searchingForId: output.productId
+            });
+            
+            // プレースホルダーは材料選択候補を汚染するので、スキップする
+            // 製品データが完全に読み込まれてから再実行されることを期待
+            console.log(`⏭️ 製品ID ${output.productId} をスキップ - 製品データ読み込み待ち`);
           }
         });
       } else {
@@ -195,7 +227,7 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
     
     console.log(`📊 前工程出力製品数: ${outputProducts.length}`);
     return outputProducts;
-  }, [getPrecedingProcesses, products, processData?.id, edges]);
+  }, [getPrecedingProcesses, products, processData?.id, edges.length]);
 
   // 先頭ノードかどうかを判定する関数
   const isHeadNode = useCallback(() => {
@@ -286,27 +318,27 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
   };
 
   // 投入材料の候補を取得
-  const getInputMaterialCandidates = useCallback(() => {
+  const getInputMaterialCandidates = useMemo(() => {
     if (!processData) return [];
     
     console.log('🔍 投入材料候補取得:', {
-      isHeadStorageNode: isHeadStorageNode(),
-      isActualHeadStorageNode: isActualHeadStorageNode(),
+      isHeadStorageNode: isHeadNode() && isStorageProcess,
+      isActualHeadStorageNode: isHeadNode(),
       enableHeadStorageNode: enableHeadStorageNode,
       isStorageProcess: isStorageProcess,
       productsCount: products.length
     });
     
     // 先頭保管ノードが有効な場合は全製品を候補に
-    if (isActualHeadStorageNode() && enableHeadStorageNode) {
+    if (isHeadNode() && enableHeadStorageNode) {
       console.log('🔍 先頭保管ノード有効: 全製品を候補に');
       return products;
     }
     
     // 先頭保管ノードが無効な場合は前工程の出力製品のみ
     console.log('🔍 先頭保管ノード無効: 前工程の出力製品のみ');
-    return getPrecedingOutputProducts();
-  }, [processData, isHeadStorageNode, isActualHeadStorageNode, enableHeadStorageNode, isStorageProcess, products, getPrecedingOutputProducts]);
+    return getPrecedingOutputProducts;
+  }, [processData?.id, isHeadNode, enableHeadStorageNode, isStorageProcess, products, getPrecedingOutputProducts]);
 
   useEffect(() => {
     if (processData) {
@@ -328,7 +360,7 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
       
       // 前工程の情報を即座に確認
       const precedingProcesses = getPrecedingProcesses();
-      const precedingOutputs = getPrecedingOutputProducts();
+      const precedingOutputs = getPrecedingOutputProducts;
       
       console.log('📊 初期化時の前工程情報:', {
         precedingProcesses: precedingProcesses.length,
@@ -386,6 +418,29 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
   useEffect(() => {
     console.log('🔍 newOutput 状態変化:', newOutput);
   }, [newOutput]);
+
+  // 製品データ更新時に前工程出力を再計算（無限ループ防止版）
+  const prevProductsCountRef = useRef(0);
+  
+  useEffect(() => {
+    if (products && products.length > 0 && processData && products.length !== prevProductsCountRef.current) {
+      console.log('🔄 製品データ更新により前工程出力を再計算', {
+        productsCount: products.length,
+        processId: processData.id,
+        previousCount: prevProductsCountRef.current,
+        availableProducts: products.map(p => ({ id: p.id, name: p.name }))
+      });
+      
+      // 前工程出力を再計算（製品データが完全になった後）
+      // この時点で getPrecedingOutputs が正しい結果を返すはず
+      if (getPrecedingOutputs) {
+        const updatedPrecedingOutputs = getPrecedingOutputs(processData.id);
+        console.log('🔄 更新された前工程出力:', updatedPrecedingOutputs.length, 'items');
+      }
+      
+      prevProductsCountRef.current = products.length;
+    }
+  }, [products.length, processData?.id]);
 
   // 材料投入追加
   const handleAddMaterial = () => {
@@ -783,13 +838,13 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
             </Typography>
             
                 {/* 前工程の出力製品情報を表示 */}
-                {getPrecedingOutputProducts().length > 0 ? (
+                {getPrecedingOutputProducts.length > 0 ? (
                   <Alert severity="info" sx={{ mb: 2 }}>
                     <Typography variant="body2">
                       🔗 <strong>前工程の出力製品</strong>が検出されました。これらを投入材料として使用できます。
                     </Typography>
                     <Box sx={{ mt: 1 }}>
-                      {getPrecedingOutputProducts().map((product, index) => (
+                      {getPrecedingOutputProducts.map((product, index) => (
                             <Chip
                           key={index}
                               label={`${product.name} (${product.processName})`}
@@ -826,7 +881,7 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                         • 前工程数: {getPrecedingProcesses().length}
                       </Typography>
                       <Typography variant="caption" component="div" sx={{ display: 'block' }}>
-                        • 前工程出力製品数: {getPrecedingOutputProducts().length}
+                        • 前工程出力製品数: {getPrecedingOutputProducts.length}
                       </Typography>
                     </Box>
                   </Alert>
@@ -894,14 +949,14 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                       currentMaterialName: newMaterial.materialName,
                       newMaterial: newMaterial,
                       productsCount: products.length,
-                      precedingProductsCount: getPrecedingOutputProducts().length,
+                      precedingProductsCount: getPrecedingOutputProducts.length,
                       enableHeadStorageNode: enableHeadStorageNode,
                       isActualHeadStorageNode: isActualHeadStorageNode(),
                       timestamp: new Date().toISOString(),
                       valueType: typeof newMaterial.materialId,
                       isEmpty: !newMaterial.materialId,
                       products: products.map(p => ({ id: p.id, name: p.name, type: p.type })),
-                      precedingProducts: getPrecedingOutputProducts().map(p => ({ id: p.id, name: p.name, type: p.type }))
+                      precedingProducts: getPrecedingOutputProducts.map(p => ({ id: p.id, name: p.name, type: p.type }))
                     });
                     return null;
                   })()}
@@ -913,7 +968,7 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                       console.log('🔍 ドロップダウンオープン:', {
                         currentValue: newMaterial.materialId,
                         availableProducts: products.length,
-                        precedingProducts: getPrecedingOutputProducts().length,
+                        precedingProducts: getPrecedingOutputProducts.length,
                         isHeadStorageNode: isHeadStorageNode(),
                         enableHeadStorageNode: enableHeadStorageNode,
                         willShowAllProducts: true
@@ -949,7 +1004,7 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                         ? products 
                         : [
                             ...products,
-                            ...getPrecedingOutputProducts().map(p => ({
+                            ...getPrecedingOutputProducts.map(p => ({
                               id: p.id,
                               name: p.name,
                               type: p.type
@@ -957,13 +1012,13 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                           ];
                       
                       const selectedProduct = allAvailableProducts.find(p => p.id === e.target.value);
-                      const precedingProduct = getPrecedingOutputProducts().find(p => p.id === e.target.value);
+                      const precedingProduct = getPrecedingOutputProducts.find(p => p.id === e.target.value);
                       
                       console.log('🔍 選択された製品情報:', {
                         selectedProduct,
                         precedingProduct,
                         allProducts: products.length,
-                        precedingProducts: getPrecedingOutputProducts().length,
+                        precedingProducts: getPrecedingOutputProducts.length,
                         allAvailableProducts: allAvailableProducts.length,
                         products: products.map(p => ({ id: p.id, name: p.name, type: p.type })),
                         enableHeadStorageNode,
@@ -1028,7 +1083,7 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                         ? products 
                         : [
                             ...products,
-                            ...getPrecedingOutputProducts().map(p => ({
+                            ...getPrecedingOutputProducts.map(p => ({
                               id: p.id,
                               name: p.name,
                               type: p.type
@@ -1054,8 +1109,13 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                       <>
                         <Box>
                           <Typography variant="caption" color="success.main" sx={{ px: 2, py: 1, display: 'block' }}>
-                            🎯 先頭保管ノード有効: 全製品から選択可能
+                            🎯 先頭保管ノード有効: 全製品から選択可能 ({products.length}件)
                           </Typography>
+                          {products.length === 0 && (
+                            <Typography variant="caption" color="warning.main" sx={{ px: 2, py: 1, display: 'block' }}>
+                              ⚠️ 製品データを読み込んでいます...
+                            </Typography>
+                          )}
                           {(() => {
                             console.log('🔍 全製品MenuItem表示（先頭保管ノード有効）:', {
                               productsCount: products.length,
@@ -1129,7 +1189,7 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                             isHeadStorageNode: isHeadStorageNode(),
                             isActualHeadStorageNode: isActualHeadStorageNode(),
                             enableHeadStorageNode: enableHeadStorageNode,
-                            precedingProductsCount: getPrecedingOutputProducts().length,
+                            precedingProductsCount: getPrecedingOutputProducts.length,
                             rawMaterialsCount: products.filter(p => p.type === 'raw_material').length,
                             allProductsCount: products.length,
                             timestamp: new Date().toISOString()
@@ -1137,13 +1197,13 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                           return null;
                         })()}
                         {/* 前工程の出力製品を最優先表示 */}
-                        {getPrecedingOutputProducts().length > 0 ? (
+                        {getPrecedingOutputProducts.length > 0 ? (
                           <>
                             <Box>
                               <Typography variant="caption" color="primary" sx={{ px: 2, py: 1, display: 'block' }}>
                                 🔗 前工程の出力製品（推奨）
                               </Typography>
-                              {getPrecedingOutputProducts().map((product) => (
+                              {getPrecedingOutputProducts.map((product) => (
                                 <MenuItem 
                                   key={`preceding_${product.id}`} 
                                   value={product.id}
@@ -1836,15 +1896,23 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                             });
                           }}
                   >
-                          {products.map((product) => (
-                      <MenuItem key={product.id} value={product.id}>
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                <ProcessIcon />
-                                <Typography>{product.name}</Typography>
-                                <Chip label={product.type} size="small" />
-                              </Box>
+                    {products.length === 0 ? (
+                      <MenuItem disabled>
+                        <Typography color="text.secondary">
+                          製品データ読み込み中...
+                        </Typography>
                       </MenuItem>
-                    ))}
+                    ) : (
+                      products.map((product) => (
+                        <MenuItem key={product.id} value={product.id}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <ProcessIcon />
+                            <Typography>{product.name}</Typography>
+                            <Chip label={product.type} size="small" />
+                          </Box>
+                        </MenuItem>
+                      ))
+                    )}
                   </Select>
                 </FormControl>
 

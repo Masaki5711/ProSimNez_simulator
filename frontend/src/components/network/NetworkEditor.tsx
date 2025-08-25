@@ -3,6 +3,7 @@ import { useSelector, useDispatch } from 'react-redux';
 import { RootState, AppDispatch } from '../../store';
 import { setNodes as setReduxNodes, setEdges as setReduxEdges } from '../../store/slices/networkSlice';
 import { fetchProjectNetwork, updateProjectNetwork } from '../../store/projectSlice';
+import { fetchComponents } from '../../store/slices/componentSlice';
 import { useLanguage } from '../../contexts/LanguageContext';
 import ReactFlow, {
   Node,
@@ -100,8 +101,23 @@ const NetworkEditor = () => {
   const { currentProject, networkData } = useSelector((state: RootState) => state.project);
   const { components } = useSelector((state: RootState) => state.components);
   
-  // プロジェクトストアからproductsも取得（フォールバック用）
-  const projectProducts = useSelector((state: RootState) => state.project.networkData?.products) || [];
+  // プロジェクトストアからproductsを取得（複数のパスを試行）
+  const projectProducts = useSelector((state: RootState) => {
+    // 複数のパスから製品データを取得を試行
+    const networkProducts = state.project.networkData?.products;
+    const componentsList = state.components.components; // componentsは.componentsプロパティにある
+    const availableProducts = networkProducts || componentsList || [];
+    
+    console.log('🔍 Redux製品データ取得状況:', {
+      networkProductsCount: networkProducts?.length || 0,
+      componentsListCount: componentsList?.length || 0,
+      selectedProducts: availableProducts.length,
+      networkProducts: networkProducts?.map(p => ({ id: p.id, name: p.name })) || [],
+      componentsList: componentsList?.map(c => ({ id: c.id, name: c.name, type: c.type })) || []
+    });
+    
+    return availableProducts;
+  });
 
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
@@ -420,13 +436,105 @@ const NetworkEditor = () => {
   // 生産管理データ（部品編集ページのデータを使用）
   const [products, setProducts] = useState<Product[]>([]);
 
-  // projectProductsの変更を監視（部品編集から戻ったときなど）
+  // projectProductsの変更を監視（プロジェクト読み込み、部品編集から戻ったときなど）
+  // 無限ループを防ぐため、productsを依存配列から削除し、useRefで前回の状態を記憶
+  const prevProductsRef = useRef<string[]>([]);
+  
   useEffect(() => {
-    if (projectProducts && projectProducts.length > 0 && products.length === 0) {
-      console.log('🔧 Updating products from projectProducts:', projectProducts.length);
-      setProducts(projectProducts);
+    if (projectProducts && projectProducts.length > 0) {
+      // プロジェクト製品データが存在し、現在のproductsと異なる場合は更新
+      const projectProductIds = projectProducts.map(p => p.id).sort();
+      const currentProductIds = products.map(p => p.id).sort();
+      const prevProductIds = prevProductsRef.current;
+      
+      // 前回と同じIDリストかチェック（無限ループ防止）
+      const isSameAsPrev = prevProductIds.length === projectProductIds.length &&
+                          prevProductIds.every((id, index) => id === projectProductIds[index]);
+      
+      const isDifferent = currentProductIds.length !== projectProductIds.length || 
+                         currentProductIds.some((id, index) => id !== projectProductIds[index]);
+      
+      if (isDifferent && !isSameAsPrev) {
+        console.log('🔧 Updating products from projectProducts:', {
+          previousCount: products.length,
+          newCount: projectProducts.length,
+          previousIds: currentProductIds,
+          newIds: projectProductIds
+        });
+        setProducts([...projectProducts]);
+        prevProductsRef.current = projectProductIds;
+      }
     }
-  }, [projectProducts, products.length]);
+    // projectProductsが空になってもproductsをクリアしない（無限ループ防止）
+  }, [projectProducts]);
+
+  // networkData変更時の製品データ同期を強制（無限ループ防止版）
+  const prevNetworkProductsRef = useRef<string[]>([]);
+  
+  useEffect(() => {
+    if (networkData?.products && networkData.products.length > 0) {
+      // networkDataの製品データと現在のproductsを比較
+      const networkProductIds = networkData.products.map(p => p.id).sort();
+      const currentProductIds = products.map(p => p.id).sort();
+      const prevNetworkIds = prevNetworkProductsRef.current;
+      
+      // 前回と同じIDリストかチェック（無限ループ防止）
+      const isSameAsPrev = prevNetworkIds.length === networkProductIds.length &&
+                          prevNetworkIds.every((id, index) => id === networkProductIds[index]);
+                          
+      const isDifferent = networkProductIds.length !== currentProductIds.length || 
+                         networkProductIds.some((id, index) => id !== currentProductIds[index]);
+      
+      if (isDifferent && !isSameAsPrev) {
+        console.log('🔧 NetworkData変更検出 - 製品データ強制同期:', {
+          networkDataProductsCount: networkData.products.length,
+          currentProductsCount: products.length,
+          networkProducts: networkData.products.map(p => ({ id: p.id, name: p.name }))
+        });
+        
+        // networkDataの製品データを直接使用（最優先）
+        setProducts([...networkData.products]);
+        prevNetworkProductsRef.current = networkProductIds;
+      }
+    }
+  }, [networkData?.products]);
+
+  // プロジェクト変更時に部品データを強制読み込み
+  useEffect(() => {
+    if (currentProject?.id) {
+      console.log('🔧 プロジェクト変更検出 - 部品データ読み込み:', currentProject.id);
+      dispatch(fetchComponents(currentProject.id));
+    }
+  }, [currentProject?.id, dispatch]);
+
+  // Redux状態のデバッグ
+  useEffect(() => {
+    console.log('🔍 NetworkEditor Redux状態デバッグ:', {
+      currentProjectId: currentProject?.id,
+      networkDataExists: !!networkData,
+      networkDataProducts: networkData?.products?.length || 0,
+      projectProductsLength: projectProducts.length,
+      productsLength: products.length,
+      componentsLength: components?.length || 0
+    });
+  }, [currentProject, networkData, projectProducts, products, components]);
+
+  // 初回マウント時に部品データを確実に読み込み
+  useEffect(() => {
+    // products配列が空で、部品データも空の場合、強制的に部品データを読み込み
+    if (products.length === 0 && components.length === 0 && currentProject?.id) {
+      console.log('🚨 初回マウント時の部品データ強制読み込み:', currentProject.id);
+      dispatch(fetchComponents(currentProject.id));
+    }
+  }, []);
+
+  // MaterialDialogが開かれた時の部品データ確認
+  useEffect(() => {
+    if (materialDialogOpen && products.length === 0 && currentProject?.id) {
+      console.log('🚨 MaterialDialog開放時の緊急部品データ読み込み');
+      dispatch(fetchComponents(currentProject.id));
+    }
+  }, [materialDialogOpen, products.length, currentProject?.id, dispatch]);
 
   const [advancedProcessDialogOpen, setAdvancedProcessDialogOpen] = useState(false);
   const [selectedAdvancedProcess, setSelectedAdvancedProcess] = useState<AdvancedProcessData | null>(null);
@@ -2544,6 +2652,16 @@ const NetworkEditor = () => {
                 networkDataProducts: networkData?.products?.length || 0,
                 actualProducts: products.map(p => ({ id: p.id, name: p.name, code: p.code }))
               });
+              
+              // 緊急対処：products配列が空の場合、networkDataから直接取得を試行
+              if (products.length === 0 && networkData?.products && networkData.products.length > 0) {
+                console.log('🚨 緊急対処: products配列が空のため、networkDataから直接使用', {
+                  networkDataProductsCount: networkData.products.length,
+                  networkProducts: networkData.products.map(p => ({ id: p.id, name: p.name }))
+                });
+                return networkData.products;
+              }
+              
               return products;
             })()}
             nodes={nodes}
