@@ -160,9 +160,19 @@ export class MaterialBalanceValidator {
       return issues;
     }
 
-    // 製品のBOMアイテムを取得（まずnetworkレベルのBOM、次にcomponentレベルのBOM）
-    let productBomItems = this.bomItems.filter(item => 
-      item.parentProductId === productId || 
+    // 入出力が同じ部品の場合（検査工程等）はBOM検証不要
+    const inputIds = inputMaterials.map((m: any) => m.materialId);
+    if (inputIds.includes(productId)) {
+      console.log(`🔍 Input/Output same product (inspection/pass-through): ${productName} - skipping BOM check`);
+      return issues;
+    }
+
+    // 製品のBOMアイテムを取得（networkレベル: parent_product / componentレベル: parentProductId）
+    let productBomItems = this.bomItems.filter(item =>
+      (item as any).parent_product === productId ||
+      (item as any).parent_product === product.code ||
+      (item as any).parent_product === product.id ||
+      item.parentProductId === productId ||
       item.parentProductId === product.code ||
       item.parentProductId === product.id
     );
@@ -274,7 +284,7 @@ export class MaterialBalanceValidator {
     // BOMの各材料について必要数量を計算し、投入材料と比較
     for (const bomItem of productBomItems) {
       const requiredQuantity = bomItem.quantity * outputQuantity;
-      const materialId = bomItem.childProductId;
+      const materialId = bomItem.childProductId || (bomItem as any).child_product;
       
       // 対応する投入材料を検索
       const inputMaterial = inputMaterials.find(input => 

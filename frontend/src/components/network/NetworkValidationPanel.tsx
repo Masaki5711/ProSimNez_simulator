@@ -46,25 +46,26 @@ const NetworkValidationPanel: React.FC<NetworkValidationPanelProps> = ({
   const [showWarnings, setShowWarnings] = useState(true);
   const [expandedSections, setExpandedSections] = useState<string[]>(['errors']);
 
-  // 自動検証（ノードやエッジが変更された時）
+  // 自動検証（デバウンス付き — ちらつき防止）
   useEffect(() => {
-    if (nodes.length > 0) {
-      validateNetworkStructure();
-    }
-  }, [nodes, edges]);
+    if (nodes.length === 0) return;
+    const timer = setTimeout(() => {
+      try {
+        const result = validateNetwork(nodes, edges);
+        setValidationResult(result);
+      } catch (error) {
+        console.error('Network validation error:', error);
+      }
+    }, 1000); // 1秒デバウンス
+    return () => clearTimeout(timer);
+  }, [nodes.length, edges.length]); // 配列の長さ変更時のみ再検証
 
-  const validateNetworkStructure = async () => {
-    setIsValidating(true);
+  const validateNetworkStructure = () => {
     try {
-      // 少し遅延を入れて検証中の状態を見せる
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
       const result = validateNetwork(nodes, edges);
       setValidationResult(result);
     } catch (error) {
       console.error('Network validation error:', error);
-    } finally {
-      setIsValidating(false);
     }
   };
 

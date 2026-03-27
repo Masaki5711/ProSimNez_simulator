@@ -144,6 +144,33 @@ const validateSimulationSettings = (
     }
   }
 
+  // 材料バランスチェック（入出力整合性）
+  for (const node of nodes) {
+    const d = node.data;
+    const effectiveType = d.type || 'process';
+    if (!processTypes.includes(effectiveType)) continue;
+
+    const inputs = d.inputs || [];
+    const outputs = d.outputs || [];
+    const inputMaterials = d.inputMaterials || [];
+    const outputProducts = d.outputProducts || [];
+
+    // 入出力が同じ（検査工程等）は正常
+    const isSameIO = inputs.length > 0 && outputs.length > 0 && inputs.some((i: string) => outputs.includes(i));
+
+    if (!isSameIO && outputProducts.length > 0 && inputMaterials.length > 0) {
+      // BOM所要量と材料設定の整合性チェック
+      for (const op of outputProducts) {
+        for (const im of inputMaterials) {
+          if (im.requiredQuantity <= 0) {
+            errors.push({ type: 'missing_input', severity: 'warning' as any,
+              message: `${d.label}: ${im.materialName || im.materialId}の必要数量が0です`, nodeIds: [node.id] });
+          }
+        }
+      }
+    }
+  }
+
   // 搬送設定チェック
   for (const edge of edges) {
     const ed = edge.data;
@@ -279,12 +306,15 @@ export const validateInputOutputConsistency = (
     const outgoingEdges = edges.filter(e => e.source === node.id);
 
     // 入力がない工程（開始工程以外）
-    if (incomingEdges.length === 0 && node.data.type !== 'storage') {
-      if (outgoingEdges.length > 0) { // 出力があるのに入力がない
+    // 先頭ノード（入力接続なし）はストアまたは開始工程として正常
+    const isStoreOrStart = ['storage', 'store'].includes(node.data.type) || node.data.storeType;
+    if (incomingEdges.length === 0 && !isStoreOrStart) {
+      if (outgoingEdges.length > 0) {
+        // 工程ノードで入力接続がないのは警告（ストアは除外）
         errors.push({
           type: 'missing_input',
           severity: 'warning',
-          message: `開始工程と思われます: ${node.data.label}（入力接続がありません）`,
+          message: `開始工程: ${node.data.label}（入力接続がありません。部品ストアからの接続が必要な場合があります）`,
           nodeIds: [node.id],
         });
       }
