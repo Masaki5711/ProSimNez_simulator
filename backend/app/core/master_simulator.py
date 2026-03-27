@@ -341,7 +341,7 @@ class MasterSimulator:
                 yield self.env.timeout(60.0)  # 1分間隔
                 
             except Exception as e:
-                print(f"メインループエラー: {e}")
+                logger.error(f"Main loop error: {e}")
                 yield self.env.timeout(10.0)
                 
     def _generate_demo_orders(self):
@@ -443,7 +443,7 @@ class MasterSimulator:
                 yield self.env.timeout(300.0)  # 5分間隔
                 
             except Exception as e:
-                print(f"KPI監視エラー: {e}")
+                logger.error(f"KPI monitoring error: {e}")
                 yield self.env.timeout(60.0)
                 
     def _collect_current_kpis(self) -> Dict[str, Any]:

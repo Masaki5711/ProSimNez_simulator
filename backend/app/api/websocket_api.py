@@ -159,53 +159,61 @@ async def _handle_client_message(message: Dict[str, Any], connection, project_id
         
     elif message_type == "simulation_start":
         # シミュレーション開始
-        logger.info(f"シミュレーション開始メッセージ受信: {message}")
+        logger.info(f"シミュレーション開始メッセージ受信")
         try:
             global enhanced_simulator
-            
-            # 既存のシミュレーションを停止してクリーンな状態から開始
+
+            # 既存のシミュレーションを停止
             if enhanced_simulator:
                 try:
                     await enhanced_simulator.stop_simulation()
-                    logger.info("既存のシミュレーションを停止しました")
-                except:
+                except Exception:
                     pass
-            
+
             # 新しいenhanced_simulatorを作成
             from app.api.simulation import create_sample_factory
-            factory = create_sample_factory()
-            
-            enhanced_simulator = EnhancedSimulationEngine(factory=factory)
-            
-            # WebSocketブロードキャスト用のイベントハンドラーを作成・登録
-            websocket_handler = WebSocketEventHandler()
-            enhanced_simulator.event_manager.register_handler(websocket_handler)
-            
-            # ネットワークデータを設定
+            from app.models.factory import Factory as FactoryModel
+
+            # ネットワークデータが含まれている場合はそれを使用
+            network_data = None
             if "data" in message and "network" in message["data"]:
                 network_data = message["data"]["network"]
-                # ネットワークデータをシミュレーションエンジンに設定
-                # ここでネットワークデータを処理
-                logger.info(f"ネットワークデータ設定完了: {len(network_data.get('nodes', []))} ノード")
-            
-            # シミュレーション開始
-            success = await enhanced_simulator.start_simulation()
-            logger.info(f"シミュレーション開始完了: {success}")
-            
-            # enhanced_simulatorが自動的にsimulation_startedイベントを送信するため手動送信は不要
+
+            if network_data and network_data.get("nodes"):
+                factory = FactoryModel(id="temp", name="Temp", description="")
+                enhanced_simulator = EnhancedSimulationEngine(factory=factory)
+                enhanced_simulator.build_factory_from_network(network_data)
+                logger.info(f"ネットワークデータから工場構築: {len(network_data.get('nodes', []))} ノード")
+            else:
+                factory = create_sample_factory()
+                enhanced_simulator = EnhancedSimulationEngine(factory=factory)
+                logger.info("サンプル工場データを使用")
+
+            # WebSocketブロードキャスト用ハンドラーを登録
+            websocket_handler = WebSocketEventHandler()
+            enhanced_simulator.event_manager.register_handler(websocket_handler)
+
+            # シミュレーション時間（デフォルト3600秒）
+            duration = 3600.0
+            if "data" in message and "duration" in message.get("data", {}):
+                duration = float(message["data"]["duration"])
+
+            success = await enhanced_simulator.start_simulation(duration)
+            logger.info(f"シミュレーション開始: {success}")
+
             if not success:
                 await connection.websocket.send_text(json.dumps({
                     "type": "error",
                     "message": "シミュレーション開始に失敗しました",
-                    "timestamp": datetime.now().isoformat()
+                    "timestamp": datetime.now().isoformat(),
                 }))
-            
+
         except Exception as e:
-            logger.error(f"シミュレーション開始エラー: {e}")
+            logger.error(f"シミュレーション開始エラー: {e}", exc_info=True)
             await connection.websocket.send_text(json.dumps({
                 "type": "error",
                 "message": f"シミュレーション開始に失敗しました: {str(e)}",
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now().isoformat(),
             }))
         
     else:
@@ -384,12 +392,11 @@ async def _broadcast_event_to_all_connections(event):
             "event_type": event.event_type,
             "data": event.data
         }
-        
-        message = json.dumps(event_data)
-        logger.info(f"WebSocketブロードキャスト: {event.event_type}")
-        
-        # すべての接続にブロードキャスト
-        await realtime_manager.websocket_manager.broadcast_to_all(message)
-        
+
+        # すべての接続にブロードキャスト（dict形式で送信）
+        sent = await realtime_manager.websocket_manager.broadcast(event_data)
+        if sent > 0:
+            logger.debug(f"WebSocketブロードキャスト: {event.event_type} -> {sent} clients")
+
     except Exception as e:
         logger.error(f"WebSocketブロードキャストエラー: {e}")

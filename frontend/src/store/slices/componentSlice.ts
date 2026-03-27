@@ -15,117 +15,96 @@ export const fetchComponents = createAsyncThunk(
         return JSON.parse(storedData);
       }
       
-      // 新規プロジェクトの場合はデフォルトの部品データを返す
-      return getDefaultComponents();
+      // プロジェクトのnetworkDataから部品データを生成して保存
+      const generated = getDefaultComponents(projectId);
+      if (generated.components.length > 0) {
+        localStorage.setItem(`project_${projectId}_components`, JSON.stringify(generated));
+      }
+      return generated;
     }
-    
+
     // プロジェクトIDが指定されていない場合は空のデータを返す
     return { components: [], categories: [] };
   }
  );
 
-// デフォルトの部品データを取得する関数
-const getDefaultComponents = () => {
+// デフォルトの部品データ: プロジェクトのnetworkDataから生成
+const getDefaultComponents = (projectId?: string) => {
   const defaultCategories: ComponentCategory[] = [
-    { id: 'cat_1', name: '原材料', description: '加工前の素材' },
-    { id: 'cat_2', name: '部品', description: '基本的な部品' },
-    { id: 'cat_3', name: 'サブアセンブリ', description: '複数の部品から構成されるサブアセンブリ' },
+    { id: 'cat_1', name: '原材料', description: '購入素材' },
+    { id: 'cat_2', name: '部品', description: '加工部品' },
+    { id: 'cat_3', name: 'サブアセンブリ', description: '中間組立品' },
     { id: 'cat_4', name: '完成品', description: '最終製品' },
-    { id: 'cat_5', name: '不良品', description: '品質基準を満たさない製品' },
   ];
 
-  const defaultComponents: Component[] = [
-    {
-      id: 'prod_steel',
-      name: '鋼材',
-      code: 'STEEL-001',
-      type: 'raw_material',
+  // プロジェクトのnetworkDataからproductsとbom_itemsを読み込む
+  let products: any[] = [];
+  let bomItems: any[] = [];
+
+  if (projectId) {
+    try {
+      const nd = localStorage.getItem(`project_${projectId}_network`);
+      if (nd) {
+        const parsed = JSON.parse(nd);
+        products = parsed.products || [];
+        bomItems = parsed.bom_items || [];
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  // productsがなければ空を返す
+  if (products.length === 0) {
+    return { components: [], categories: defaultCategories };
+  }
+
+  // productsからComponentに変換
+  const typeToCategory: Record<string, string> = {
+    'component': 'cat_2', 'raw_material': 'cat_1',
+    'sub_assembly': 'cat_3', 'finished_product': 'cat_4',
+  };
+
+  const now = new Date().toISOString();
+  const components: Component[] = products.map((p: any) => {
+    // BOMからこの製品の子部品を取得
+    const childBom: ComponentBOMItem[] = bomItems
+      .filter((b: any) => b.parent_product === p.id)
+      .map((b: any) => ({
+        id: b.id || `bom_${p.id}_${b.child_product}`,
+        parentProductId: p.id,
+        childProductId: b.child_product,
+        quantity: b.quantity,
+        unit: '個',
+        isOptional: false,
+        effectiveDate: now,
+        alternativeProducts: [],
+        notes: '',
+      }));
+
+    return {
+      id: p.id,
+      name: p.name,
+      code: p.code || p.id.toUpperCase(),
+      type: p.type || 'component',
       version: '1.0',
-      description: '高品質鋼材',
-      unitCost: 500,
-      leadTime: 7,
-      supplier: '鋼材商事',
+      description: p.name,
+      unitCost: p.unitCost || 0,
+      leadTime: 0,
+      supplier: p.type === 'component' ? '外部調達' : '自社製造',
       storageConditions: '常温',
       isDefective: false,
       originalProductId: undefined,
       qualityGrade: 'standard',
-      category: 'cat_1',
-      unit: 'kg',
-      specifications: { material: '鋼材', grade: '高品質' },
-      bomItems: [],
-      transportLotSize: 100,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    },
-    {
-      id: 'prod_bolt',
-      name: 'ボルト',
-      code: 'BOLT-M8',
-      type: 'component',
-      version: '1.0',
-      description: 'M8 六角ボルト',
-      unitCost: 50,
-      leadTime: 3,
-      supplier: 'ファスナー工業',
-      storageConditions: '常温',
-      isDefective: false,
-      originalProductId: undefined,
-      qualityGrade: 'standard',
-      category: 'cat_2',
+      category: typeToCategory[p.type] || 'cat_2',
       unit: '個',
-      specifications: { diameter: 'M8', type: '六角' },
-      bomItems: [],
-      transportLotSize: 50,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    },
-    {
-      id: 'prod_bracket',
-      name: 'ブラケット',
-      code: 'BRKT-001',
-      type: 'sub_assembly',
-      version: '1.0',
-      description: '鋼材製ブラケット',
-      unitCost: 800,
-      leadTime: 5,
-      supplier: '鋼材商事',
-      storageConditions: '常温',
-      isDefective: false,
-      originalProductId: undefined,
-      qualityGrade: 'standard',
-      category: 'cat_3',
-      unit: '個',
-      specifications: { material: '鋼材', type: 'ブラケット' },
-      bomItems: [],
+      specifications: {},
+      bomItems: childBom,
       transportLotSize: 10,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    },
-    {
-      id: 'prod_final',
-      name: '完成品A',
-      code: 'PROD-A',
-      type: 'finished_product',
-      version: '1.0',
-      description: '最終製品A',
-      unitCost: 2000,
-      leadTime: 10,
-      supplier: '自社製造',
-      storageConditions: '常温',
-      isDefective: false,
-      originalProductId: undefined,
-      qualityGrade: 'standard',
-      category: 'cat_4',
-      unit: '個',
-      specifications: { type: '完成品', model: 'A' },
-      bomItems: [],
-      transportLotSize: 5,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    },
-  ];
+      createdAt: now,
+      updatedAt: now,
+    };
+  });
 
-  return { components: defaultComponents, categories: defaultCategories };
+  return { components, categories: defaultCategories };
 };
 
 export const saveComponent = createAsyncThunk(

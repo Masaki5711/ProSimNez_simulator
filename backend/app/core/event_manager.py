@@ -2,11 +2,14 @@
 高度なイベント管理システム
 """
 import asyncio
+import logging
 from typing import Dict, List, Callable, Optional, Any
 from datetime import datetime
 from enum import Enum
 import json
 import uuid
+
+logger = logging.getLogger(__name__)
 
 from app.models.event import SimulationEvent
 
@@ -59,11 +62,33 @@ class EventManager:
     def register_handler(self, handler: EventHandler):
         """イベントハンドラーを登録"""
         self.handlers[handler.handler_id] = handler
-        
+
+    def add_handler(self, event_type: str, callback):
+        """簡易コールバックハンドラーを登録（互換性用）"""
+        handler = CallbackEventHandler(
+            handler_id=f"callback_{event_type}_{id(callback)}",
+            event_types=[event_type],
+            callback=callback,
+        )
+        self.handlers[handler.handler_id] = handler
+
     def unregister_handler(self, handler_id: str):
         """イベントハンドラーの登録を解除"""
         if handler_id in self.handlers:
             del self.handlers[handler_id]
+
+    def get_recent_events(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """最近のイベントをdict形式で取得"""
+        events = self.event_history[-limit:]
+        result = []
+        for e in events:
+            result.append({
+                "timestamp": e.timestamp.isoformat() if e.timestamp else "",
+                "event_type": e.event_type,
+                "description": e.data.get("description", e.event_type),
+                "source": e.process_id or "",
+            })
+        return result
             
     def get_matching_handlers(self, event: SimulationEvent) -> List[EventHandler]:
         """イベントにマッチするハンドラーを取得"""
@@ -134,7 +159,7 @@ class EventManager:
                 # タイムアウトは正常な動作
                 continue
             except Exception as e:
-                print(f"イベント処理エラー: {e}")
+                logger.error(f"Event processing error: {e}")
                 
     async def _handle_event(self, event: SimulationEvent):
         """単一イベントを処理"""
@@ -151,7 +176,7 @@ class EventManager:
                     if success:
                         self.stats["handlers_executed"] += 1
                 except Exception as e:
-                    print(f"ハンドラー {handler.handler_id} でエラー: {e}")
+                    logger.error(f"Handler {handler.handler_id} error: {e}")
                     self.stats["events_failed"] += 1
                     
             # 履歴に追加
@@ -171,7 +196,7 @@ class EventManager:
             )
             
         except Exception as e:
-            print(f"イベント処理エラー: {e}")
+            logger.error(f"Event handling error: {e}")
             self.stats["events_failed"] += 1
             
     def get_event_history(self, event_type: Optional[str] = None, limit: int = 100) -> List[SimulationEvent]:
@@ -195,6 +220,26 @@ class EventManager:
     def clear_history(self):
         """イベント履歴をクリア"""
         self.event_history.clear()
+
+class CallbackEventHandler(EventHandler):
+    """コールバック関数をラップするイベントハンドラー"""
+
+    def __init__(self, handler_id: str, event_types: List[str], callback,
+                 priority: EventPriority = EventPriority.NORMAL):
+        super().__init__(handler_id, event_types, priority)
+        self.callback = callback
+
+    async def handle(self, event: SimulationEvent) -> bool:
+        try:
+            if asyncio.iscoroutinefunction(self.callback):
+                await self.callback(event)
+            else:
+                self.callback(event)
+            return True
+        except Exception as e:
+            logger.error(f"Callback handler error: {e}")
+            return False
+
 
 class RealtimeEventHandler(EventHandler):
     """リアルタイムデータ配信用ハンドラー"""
@@ -225,7 +270,7 @@ class RealtimeEventHandler(EventHandler):
                 
             return True
         except Exception as e:
-            print(f"リアルタイム配信エラー: {e}")
+            logger.error(f"Realtime broadcast error: {e}")
             return False
 
 class StatisticsEventHandler(EventHandler):
@@ -279,7 +324,7 @@ class StatisticsEventHandler(EventHandler):
                     
             return True
         except Exception as e:
-            print(f"統計収集エラー: {e}")
+            logger.error(f"Statistics collection error: {e}")
             return False
             
     def get_production_statistics(self) -> Dict[str, Any]:

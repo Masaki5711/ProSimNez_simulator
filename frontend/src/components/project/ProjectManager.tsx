@@ -69,6 +69,7 @@ import {
   updateProject,
   deleteProject,
   setCurrentProject,
+  setNetworkData,
   setFilter,
   setSearchTerm,
   setSortBy,
@@ -315,8 +316,22 @@ const ProjectManager: React.FC<ProjectManagerProps> = ({
   // プロジェクト選択時の処理
   const handleProjectSelect = (project: Project) => {
     dispatch(setCurrentProject(project));
-    // ネットワーク編集ページに遷移
-    navigate('/network-editor');
+
+    // 選択を記録（次回起動時の復元用）
+    localStorage.setItem('lastSelectedProjectId', project.id);
+
+    // ネットワークデータをReduxにロード
+    try {
+      const nd = localStorage.getItem(`project_${project.id}_network`);
+      if (nd) {
+        dispatch(setNetworkData(JSON.parse(nd)));
+      }
+    } catch (e) {
+      console.warn('Network data load failed:', e);
+    }
+
+    // シミュレーションページに遷移
+    navigate('/');
   };
 
   // カテゴリの表示名

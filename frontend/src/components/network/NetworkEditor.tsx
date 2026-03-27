@@ -52,7 +52,7 @@ import {
 
 import ProcessEditDialog from './ProcessEditDialog';
 import ConnectionEditDialog from './ConnectionEditDialog';
-import AdvancedProcessDialog from '../production/AdvancedProcessDialog';
+// AdvancedProcessDialog は ProcessEditDialog に統合済み（削除）
 import ProcessMaterialDialog from '../production/ProcessMaterialDialog';
 import IEAnalysisPanel from './IEAnalysisPanel';
 import NetworkValidationPanel from './NetworkValidationPanel';
@@ -65,6 +65,7 @@ import StoreEditDialog from './StoreEditDialog';
 
 import { networkEditorApi as importedNetworkEditorApi } from '../../api/networkEditorApi';
 import { simulationApi as importedSimulationApi } from '../../api/simulationApi';
+import { getAssemblyLineDemoData } from '../../data/assemblyLineDemo';
 
 interface NetworkEditorApiType {
   saveNetwork: (networkData: any) => Promise<any>;
@@ -90,7 +91,9 @@ const simulationApi: SimulationApiType = importedSimulationApi;
 const nodeTypes = { process: ProcessNode, store: StoreNode };
 const edgeTypes = { transport: TransportEdge };
 const defaultEdgeOptions = {
-  markerEnd: { type: MarkerType.ArrowClosed },
+  style: { strokeWidth: 3, stroke: '#1976d2' },
+  markerEnd: { type: MarkerType.ArrowClosed, width: 20, height: 20, color: '#1976d2' },
+  animated: true,
 };
 
 const NetworkEditor = () => {
@@ -184,7 +187,17 @@ const NetworkEditor = () => {
         process_advanced_data: networkData.process_advanced_data ? Object.keys(networkData.process_advanced_data).length : 0
       });
       
-      setNodes(networkData.nodes || []);
+      // ReactFlowのnode.typeを正規化（machining/assembly/inspection → process）
+      const normalizedNodes = (networkData.nodes || []).map((node: any) => ({
+        ...node,
+        type: node.type === 'store' || node.type === 'storage' ? 'store' : 'process',
+        data: {
+          ...node.data,
+          // data.typeに元の工程種別を保持
+          type: node.data?.type || node.type || 'machining',
+        },
+      }));
+      setNodes(normalizedNodes);
       setEdges(networkData.edges || []);
       
       // productsも復元 - networkDataから、またはprojectProductsからフォールバック
@@ -373,10 +386,9 @@ const NetworkEditor = () => {
       console.log('NetworkEditor: openMaterialDialog event received:', event.detail);
       const { nodeId, nodeData } = event.detail;
       
-      // 既存の材料データがあるかチェック
+      // 既存の材料データがあるかチェック（processAdvancedData → node.dataの順で探す）
       let existingData = processAdvancedData.get(nodeId);
       if (!existingData) {
-        // 新規作成
         existingData = {
           id: nodeId,
           label: nodeData.label,
@@ -386,16 +398,17 @@ const NetworkEditor = () => {
           equipmentCount: nodeData.equipmentCount,
           operatorCount: nodeData.operatorCount,
           availability: 85,
-          inputMaterials: [],
-          outputProducts: [],
+          // node.dataから材料設定を読む（あれば）
+          inputMaterials: nodeData.inputMaterials || [],
+          outputProducts: nodeData.outputProducts || [],
           bomMappings: [],
-          schedulingMode: 'push',
-          batchSize: 1,
+          schedulingMode: nodeData.schedulingMode || 'push',
+          batchSize: nodeData.batchSize || 1,
           minBatchSize: 1,
           maxBatchSize: 100,
-          defectRate: nodeData.qualitySettings?.defectRate || 0,
-          reworkRate: nodeData.qualitySettings?.reworkRate || 0,
-          operatingCost: 0, // 削除されたパラメータ
+          defectRate: nodeData.qualitySettings?.defectRate || nodeData.defectRate || 0,
+          reworkRate: nodeData.qualitySettings?.reworkRate || nodeData.reworkRate || 0,
+          operatingCost: 0,
           qualityCheckpoints: [],
           skillRequirements: [],
           toolRequirements: [],
@@ -536,8 +549,7 @@ const NetworkEditor = () => {
     }
   }, [materialDialogOpen, products.length, currentProject?.id, dispatch]);
 
-  const [advancedProcessDialogOpen, setAdvancedProcessDialogOpen] = useState(false);
-  const [selectedAdvancedProcess, setSelectedAdvancedProcess] = useState<AdvancedProcessData | null>(null);
+  // AdvancedProcessDialog は削除済み（ProcessEditDialogに統合）
 
   // ノードのダブルクリックで編集
   const onNodeDoubleClick = useCallback((event: React.MouseEvent, node: Node<ProcessNodeData>) => {
@@ -568,55 +580,56 @@ const NetworkEditor = () => {
         setProcessEditDialogOpen(true);
         break;
       case 'advanced_edit':
-        const existingData = processAdvancedData.get(contextMenuNode.id);
-        if (existingData) {
-          setSelectedAdvancedProcess(existingData);
-        } else {
-          // 新規作成
-          const newAdvancedData: AdvancedProcessData = {
+        // ProcessEditDialogに統合 — ダブルクリックと同じ動作
+        setSelectedNode(contextMenuNode);
+        setProcessEditDialogOpen(true);
+        break;
+      case 'material_edit':
+        // processAdvancedDataマップから取得、なければnode.dataから復元
+        let materialData = processAdvancedData.get(contextMenuNode.id);
+        if (!materialData) {
+          const nd = contextMenuNode.data;
+          materialData = {
             id: contextMenuNode.id,
-            label: contextMenuNode.data.label,
-            type: contextMenuNode.data.type,
-            cycleTime: contextMenuNode.data.cycleTime,
-            setupTime: contextMenuNode.data.setupTime, // 基本設定の段取り時間
-            equipmentCount: contextMenuNode.data.equipmentCount,
-            operatorCount: contextMenuNode.data.operatorCount,
-            availability: 85, // デフォルト値
-            inputMaterials: [],
-            outputProducts: [],
+            label: nd.label,
+            type: nd.type,
+            cycleTime: nd.cycleTime,
+            setupTime: nd.setupTime,
+            equipmentCount: nd.equipmentCount,
+            operatorCount: nd.operatorCount,
+            availability: 85,
+            // node.dataのinputMaterials/outputProductsを使用（あれば）
+            inputMaterials: nd.inputMaterials || [],
+            outputProducts: nd.outputProducts || [],
             bomMappings: [],
-            schedulingMode: 'push',
-            batchSize: 1,
+            schedulingMode: (nd.schedulingMode || 'push') as 'push' | 'pull' | 'hybrid',
+            batchSize: nd.batchSize || 1,
             minBatchSize: 1,
             maxBatchSize: 100,
-            defectRate: contextMenuNode.data.qualitySettings?.defectRate || 0,
-            reworkRate: contextMenuNode.data.qualitySettings?.reworkRate || 0,
-            operatingCost: 0, // 削除されたパラメータ
+            defectRate: nd.qualitySettings?.defectRate || nd.defectRate || 0,
+            reworkRate: nd.qualitySettings?.reworkRate || nd.reworkRate || 0,
+            operatingCost: 0,
             qualityCheckpoints: [],
             skillRequirements: [],
             toolRequirements: [],
             capacityConstraints: [],
             setupHistory: [],
           };
-          setSelectedAdvancedProcess(newAdvancedData);
+          // マップにも保存して次回から使えるように
+          setProcessAdvancedData(prev => new Map(prev.set(contextMenuNode.id, materialData!)));
         }
-        setAdvancedProcessDialogOpen(true);
-        break;
-      case 'material_edit':
-        const materialData = processAdvancedData.get(contextMenuNode.id);
         if (materialData) {
           setSelectedProcessForMaterial(materialData);
         } else {
-          // 新規作成
           const newMaterialData: AdvancedProcessData = {
             id: contextMenuNode.id,
             label: contextMenuNode.data.label,
             type: contextMenuNode.data.type,
             cycleTime: contextMenuNode.data.cycleTime,
-            setupTime: contextMenuNode.data.setupTime, // 基本設定の段取り時間
+            setupTime: contextMenuNode.data.setupTime,
             equipmentCount: contextMenuNode.data.equipmentCount,
             operatorCount: contextMenuNode.data.operatorCount,
-            availability: 85, // デフォルト値
+            availability: 85,
             inputMaterials: [],
             outputProducts: [],
             bomMappings: [],
@@ -626,7 +639,7 @@ const NetworkEditor = () => {
             maxBatchSize: 100,
             defectRate: contextMenuNode.data.qualitySettings?.defectRate || 0,
             reworkRate: contextMenuNode.data.qualitySettings?.reworkRate || 0,
-            operatingCost: 0, // 削除されたパラメータ
+            operatingCost: 0,
             qualityCheckpoints: [],
             skillRequirements: [],
             toolRequirements: [],
@@ -1441,7 +1454,7 @@ const NetworkEditor = () => {
           newMap.set(selectedNode.id, {
             ...existingData,
             ...data,
-            // 既存の拡張データは保持
+            schedulingMode: (data.schedulingMode || existingData.schedulingMode || 'push') as 'push' | 'pull' | 'hybrid',
             inputMaterials: existingData.inputMaterials || [],
             outputProducts: existingData.outputProducts || [],
             bomMappings: existingData.bomMappings || [],
@@ -1494,6 +1507,7 @@ const NetworkEditor = () => {
             currentProcessAdvancedData.set(selectedNode.id, {
               ...existingData,
               ...data,
+              schedulingMode: (data.schedulingMode || existingData.schedulingMode || 'push') as 'push' | 'pull' | 'hybrid',
               inputMaterials: existingData.inputMaterials || [],
               outputProducts: existingData.outputProducts || [],
               bomMappings: existingData.bomMappings || [],
@@ -1878,6 +1892,46 @@ const NetworkEditor = () => {
     }
   };
 
+  // 組立ラインデモを読み込む関数
+  const handleLoadAssemblyLineDemo = () => {
+    try {
+      setLoading(true);
+      const demoData = getAssemblyLineDemoData();
+
+      // ノードを設定
+      setNodes(demoData.nodes.map((node: any) => ({
+        ...node,
+        type: node.type || 'process',
+      })));
+
+      // エッジを設定
+      setEdges(demoData.edges.map((edge: any) => ({
+        ...edge,
+        type: edge.type || 'transport',
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+        },
+      })));
+
+      // 製品データを設定
+      setProducts(demoData.products as Product[]);
+
+      // ビューを調整
+      if (reactFlowInstance) {
+        setTimeout(() => {
+          reactFlowInstance.fitView();
+        }, 100);
+      }
+
+      alert('組立ラインデモを読み込みました\n\n構成:\n・部品庫（部品A, B, C）\n・組立工程1（サブアセンブリ1を組立）\n・組立工程2（完成品ASSYを組立）\n・検査工程\n・完成品ストア');
+    } catch (error) {
+      console.error('デモ読込エラー:', error);
+      alert('デモの読み込みに失敗しました');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // 前工程の出力製品を取得する関数
   const getPrecedingOutputs = useCallback((processId: string): Product[] => {
     const precedingEdges = edges.filter(edge => edge.target === processId);
@@ -1978,6 +2032,16 @@ const NetworkEditor = () => {
               onNodeDoubleClick={onNodeDoubleClick}
               onNodeContextMenu={onNodeContextMenu}
               onEdgeDoubleClick={onEdgeDoubleClick}
+              onEdgeClick={(event, edge) => {
+                console.log('Edge clicked:', edge.id);
+                setSelectedEdge(edge as Edge<ConnectionData>);
+              }}
+              onEdgeContextMenu={(event, edge) => {
+                event.preventDefault();
+                console.log('Edge right-clicked:', edge.id);
+                setSelectedEdge(edge as Edge<ConnectionData>);
+                setConnectionEditDialogOpen(true);
+              }}
               onNodeClick={(event, node) => {
                 setSelectedNode(node);
                 console.log('Node selected:', node.id, node.data.label);
@@ -2358,6 +2422,23 @@ const NetworkEditor = () => {
                     min={0.1}
                     max={10}
                   />
+                  <Divider sx={{ my: 2 }} />
+                  <Typography variant="subtitle2" gutterBottom>デモデータ読込</Typography>
+                  <Button
+                    variant="outlined"
+                    color="secondary"
+                    fullWidth
+                    sx={{ mb: 1 }}
+                    onClick={handleLoadAssemblyLineDemo}
+                    disabled={loading}
+                  >
+                    組立ラインデモを読込
+                  </Button>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
+                    部品庫→組立1→組立2→検査→完成品ストア
+                  </Typography>
+
+                  <Divider sx={{ my: 2 }} />
                   <Button
                     variant="contained"
                     color="primary"
@@ -2602,45 +2683,7 @@ const NetworkEditor = () => {
             </DialogActions>
           </Dialog>
 
-          {/* 拡張工程設定ダイアログ */}
-          <AdvancedProcessDialog
-            open={advancedProcessDialogOpen}
-            processData={selectedAdvancedProcess}
-            products={products}
-            onClose={() => {
-              setAdvancedProcessDialogOpen(false);
-              setSelectedAdvancedProcess(null);
-            }}
-            onSave={(processData) => {
-              console.log('Advanced process data saved:', processData);
-              // 工程の拡張データを保存
-              setProcessAdvancedData(prev => new Map(prev.set(processData.id, processData)));
-              
-              // 即座にプロジェクトネットワークデータを永続化
-              if (currentProject?.id) {
-                setTimeout(() => {
-                  const currentProcessAdvancedData = new Map(processAdvancedData);
-                  currentProcessAdvancedData.set(processData.id, processData);
-                  
-                  dispatch(updateProjectNetwork({
-                    projectId: currentProject.id,
-                    networkData: {
-                      nodes: nodes,
-                      edges: edges,
-                      products: networkData?.products || [],
-                      bom_items: networkData?.bom_items || [],
-                      variants: networkData?.variants || [],
-                      process_advanced_data: Object.fromEntries(currentProcessAdvancedData),
-                    }
-                  }));
-                  console.log('Advanced process data immediately persisted to project network');
-                }, 100);
-              }
-              
-              setAdvancedProcessDialogOpen(false);
-              setSelectedAdvancedProcess(null);
-            }}
-          />
+          {/* AdvancedProcessDialog は ProcessEditDialog に統合済み */}
 
           {/* 工程材料設定ダイアログ */}
           <ProcessMaterialDialog

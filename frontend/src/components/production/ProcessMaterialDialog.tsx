@@ -142,6 +142,7 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
     }
   });
   const [editingMaterialIndex, setEditingMaterialIndex] = useState<number | null>(null);
+  const [materialAccordionOpen, setMaterialAccordionOpen] = useState(false);
   const [editingOutputIndex, setEditingOutputIndex] = useState<number | null>(null);
 
   // 前工程を取得する関数
@@ -633,6 +634,7 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
   // 材料編集
   const handleEditMaterial = (index: number) => {
     setEditingMaterialIndex(index);
+    setMaterialAccordionOpen(true); // 編集時にフォームを開く
     const material = editingProcess!.inputMaterials[index];
     setNewMaterial({
       ...material,
@@ -887,11 +889,11 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                   </Alert>
                 )}
 
-                {/* 材料追加フォーム */}
-                <Accordion>
+                {/* 材料追加/編集フォーム */}
+                <Accordion expanded={materialAccordionOpen} onChange={(_, isExpanded) => setMaterialAccordionOpen(isExpanded)}>
                   <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                    <Typography>
-                      {editingMaterialIndex !== null ? '材料編集' : '材料追加'}
+                    <Typography fontWeight={editingMaterialIndex !== null ? 'bold' : 'normal'} color={editingMaterialIndex !== null ? 'primary' : 'inherit'}>
+                      {editingMaterialIndex !== null ? '📝 材料編集中' : '➕ 材料追加'}
                   </Typography>
                   </AccordionSummary>
                   <AccordionDetails>
@@ -1104,220 +1106,12 @@ const ProcessMaterialDialog: React.FC<ProcessMaterialDialogProps> = ({
                       return product ? product.name : '';
                     }}
                   >
-                    {/* 先頭保管ノードが有効な場合のみ全製品を表示、それ以外は前工程の出力製品のみ */}
-                    {isActualHeadStorageNode() && enableHeadStorageNode ? (
-                      <>
-                        <Box>
-                          <Typography variant="caption" color="success.main" sx={{ px: 2, py: 1, display: 'block' }}>
-                            🎯 先頭保管ノード有効: 全製品から選択可能 ({products.length}件)
-                          </Typography>
-                          {products.length === 0 && (
-                            <Typography variant="caption" color="warning.main" sx={{ px: 2, py: 1, display: 'block' }}>
-                              ⚠️ 製品データを読み込んでいます...
-                            </Typography>
-                          )}
-                          {(() => {
-                            console.log('🔍 全製品MenuItem表示（先頭保管ノード有効）:', {
-                              productsCount: products.length,
-                              products: products.map(p => ({ id: p.id, name: p.name, type: p.type })),
-                              isHeadStorageNode: isHeadStorageNode(),
-                              isActualHeadStorageNode: isActualHeadStorageNode(),
-                              enableHeadStorageNode: enableHeadStorageNode
-                            });
-                            return null;
-                          })()}
-                          {products.map((product) => {
-                            console.log('🔍 MenuItem レンダリング（先頭保管ノード有効）:', {
-                              productId: product.id,
-                              productName: product.name,
-                              productType: product.type,
-                              value: product.id,
-                              currentValue: newMaterial.materialId
-                            });
-                            
-                            return (
-                              <MenuItem 
-                                key={product.id} 
-                                value={product.id}
-                                data-testid={`material-option-${product.id}`}
-                                dense={false}
-                                disableGutters={false}
-                                onClick={(e) => {
-                                  console.log('🔍 MenuItem クリックイベント（先頭保管ノード有効）:', {
-                                    productId: product.id,
-                                    productName: product.name,
-                                    productType: product.type,
-                                    event: e,
-                                    target: e.target,
-                                    currentTarget: e.currentTarget,
-                                    timestamp: new Date().toISOString()
-                                  });
-                                  
-                                  // 手動で状態を更新
-                                  const updatedMaterial = {
-                                    ...newMaterial,
-                                    materialId: product.id,
-                                    materialName: product.name
-                                  };
-                                  
-                                  console.log('🔍 手動更新の材料データ（先頭保管ノード有効）:', updatedMaterial);
-                                  setNewMaterial(updatedMaterial);
-                                  
-                                  // Selectコンポーネントのopen状態制御でドロップダウンを閉じる
-                                  setSelectOpen(false);
-                                }}
-                              >
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                  <MaterialIcon />
-                                  <Typography>{product.name}</Typography>
-                                  <Chip
-                                    label={product.type} 
-                                    size="small"
-                                    color="default"
-                                  />
-                                </Box>
-                              </MenuItem>
-                            );
-                          })}
-                        </Box>
-                      </>
-                    ) : (
-                      /* 先頭保管ノードが無効な場合、または通常の材料選択ロジック */
-                      <>
-                        {(() => {
-                          console.log('🔍 制限された材料選択ロジック実行:', {
-                            isHeadStorageNode: isHeadStorageNode(),
-                            isActualHeadStorageNode: isActualHeadStorageNode(),
-                            enableHeadStorageNode: enableHeadStorageNode,
-                            precedingProductsCount: getPrecedingOutputProducts.length,
-                            rawMaterialsCount: products.filter(p => p.type === 'raw_material').length,
-                            allProductsCount: products.length,
-                            timestamp: new Date().toISOString()
-                          });
-                          return null;
-                        })()}
-                        {/* 前工程の出力製品を最優先表示 */}
-                        {getPrecedingOutputProducts.length > 0 ? (
-                          <>
-                            <Box>
-                              <Typography variant="caption" color="primary" sx={{ px: 2, py: 1, display: 'block' }}>
-                                🔗 前工程の出力製品（推奨）
-                              </Typography>
-                              {getPrecedingOutputProducts.map((product) => (
-                                <MenuItem 
-                                  key={`preceding_${product.id}`} 
-                                  value={product.id}
-                                  data-testid={`preceding-material-option-${product.id}`}
-                                  onClick={(e) => {
-                                    console.log('🔍 前工程出力製品選択:', {
-                                      productId: product.id,
-                                      productName: product.name,
-                                      timestamp: new Date().toISOString()
-                                    });
-                                    
-                                    // Selectコンポーネントのopen状態制御でドロップダウンを閉じる
-                                    setSelectOpen(false);
-                                  }}
-                                >
-                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                    <MaterialIcon />
-                                    <Typography>{product.name}</Typography>
-                                    <Chip
-                                      label={`前工程: ${product.processName}`}
-                                      size="small" 
-                                      color="primary"
-                                      variant="outlined"
-                                    />
-                                    <Chip 
-                                      label={product.type} 
-                                      size="small"
-                                      color="default"
-                                    />
-                                  </Box>
-                                </MenuItem>
-                              ))}
-                            </Box>
-
-                            {/* 原材料（前工程の出力製品がある場合） */}
-                            {products.filter(p => p.type === 'raw_material').length > 0 && (
-                              <>
-                                <Box sx={{ borderTop: 1, borderColor: 'divider', my: 1 }} />
-                                <Box>
-                                  <Typography variant="caption" color="text.secondary" sx={{ px: 2, py: 1, display: 'block' }}>
-                                    🌱 原材料（補助的）
-                                  </Typography>
-                                  {products
-                                    .filter(p => p.type === 'raw_material')
-                                    .map((product) => (
-                                      <MenuItem 
-                                        key={product.id} 
-                                        value={product.id}
-                                        data-testid={`raw-material-option-${product.id}`}
-                                        onClick={(e) => {
-                                          console.log('🔍 原材料選択:', {
-                                            productId: product.id,
-                                            productName: product.name,
-                                            timestamp: new Date().toISOString()
-                                          });
-                                          
-                                          // Selectコンポーネントのopen状態制御でドロップダウンを閉じる
-                                          setSelectOpen(false);
-                                        }}
-                                      >
-                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                          <MaterialIcon />
-                                          <Typography>{product.name}</Typography>
-                                          <Chip 
-                                            label={product.type} 
-                                            size="small"
-                                            color="default"
-                                          />
-                                        </Box>
-                                      </MenuItem>
-                                    ))}
-                                </Box>
-                              </>
-                            )}
-                          </>
-                        ) : (
-                          /* 前工程の出力製品がない場合は原材料のみ */
-                          <Box>
-                            <Typography variant="caption" color="text.secondary" sx={{ px: 2, py: 1, display: 'block' }}>
-                              🌱 原材料
-                            </Typography>
-                            {products
-                              .filter(p => p.type === 'raw_material')
-                              .map((product) => (
-                                <MenuItem 
-                                  key={product.id} 
-                                  value={product.id}
-                                  data-testid={`raw-material-only-option-${product.id}`}
-                                  onClick={(e) => {
-                                    console.log('🔍 原材料選択（前工程なし）:', {
-                                      productId: product.id,
-                                      productName: product.name,
-                                      timestamp: new Date().toISOString()
-                                    });
-                                    
-                                    // Selectコンポーネントのopen状態制御でドロップダウンを閉じる
-                                    setSelectOpen(false);
-                                  }}
-                                >
-                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                    <MaterialIcon />
-                                    <Typography>{product.name}</Typography>
-                                    <Chip 
-                                      label={product.type} 
-                                      size="small" 
-                                      color="default"
-                                    />
-                                  </Box>
-                                </MenuItem>
-                              ))}
-                          </Box>
-                        )}
-                      </>
-                    )}
+                    {/* all products as MenuItems */}
+                    {products.map((product) => (
+                      <MenuItem key={product.id} value={product.id}>
+                        {product.name} ({product.code || product.type})
+                      </MenuItem>
+                    ))}
                   </Select>
                 </FormControl>
 

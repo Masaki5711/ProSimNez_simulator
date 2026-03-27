@@ -13,7 +13,15 @@ export interface ProcessNodeData {
   equipmentCount: number;       // 設備台数
   operatorCount: number;        // 作業者数
   
-  // バッファ設定は材料設定で部品・製品ごとに個別設定
+  // バッファ容量
+  inputBufferCapacity?: number;   // 入力バッファ容量（個）
+  outputBufferCapacity?: number;  // 出力バッファ容量（個）
+
+  // 材料設定（ProcessMaterialDialog形式）
+  inputMaterials?: any[];         // 投入材料リスト
+  outputProducts?: any[];         // 出力製品リスト
+  schedulingMode?: 'push' | 'pull' | 'hybrid';  // スケジューリング方式
+  batchSize?: number;             // バッチサイズ
   
   // 品質管理設定
   qualitySettings?: QualitySettings;

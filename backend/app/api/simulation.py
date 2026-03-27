@@ -7,10 +7,59 @@ from pydantic import BaseModel
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 import asyncio
+import logging
 import os
 import glob
 import json
 import uuid
+
+from app.config import simulation_settings
+
+logger = logging.getLogger(__name__)
+
+
+# カスタム例外クラス
+class SimulationError(Exception):
+    """シミュレーション関連の基底例外"""
+    pass
+
+
+class SimulationNotFoundError(SimulationError):
+    """シミュレーションが見つからない"""
+    pass
+
+
+class SimulationAlreadyRunningError(SimulationError):
+    """シミュレーションが既に実行中"""
+    pass
+
+
+class SimulationNotRunningError(SimulationError):
+    """シミュレーションが実行されていない"""
+    pass
+
+
+class InvalidConfigurationError(SimulationError):
+    """設定が無効"""
+    pass
+
+
+def handle_simulation_error(e: Exception) -> HTTPException:
+    """シミュレーションエラーをHTTPExceptionに変換"""
+    if isinstance(e, SimulationNotFoundError):
+        return HTTPException(status_code=404, detail=str(e))
+    elif isinstance(e, SimulationAlreadyRunningError):
+        return HTTPException(status_code=409, detail=str(e))
+    elif isinstance(e, SimulationNotRunningError):
+        return HTTPException(status_code=400, detail=str(e))
+    elif isinstance(e, InvalidConfigurationError):
+        return HTTPException(status_code=422, detail=str(e))
+    elif isinstance(e, SimulationError):
+        return HTTPException(status_code=500, detail=str(e))
+    else:
+        logger.error(f"Unexpected error: {e}", exc_info=True)
+        return HTTPException(status_code=500, detail="Internal server error")
+
 
 from app.core.simulator import SimulationEngine
 from app.core.master_simulator import MasterSimulator, SimulationConfig as MasterSimulationConfig, SimulationResults
@@ -21,23 +70,67 @@ from app.models.product import Product
 
 router = APIRouter()
 
-# グローバルシミュレーションエンジンインスタンス
-simulation_engine: Optional[SimulationEngine] = None
-simulation_task: Optional[asyncio.Task] = None
 
-# 新しいマスターシミュレータ
-master_simulator: Optional[MasterSimulator] = None
-simulation_results: Dict[str, SimulationResults] = {}
+class SimulationManager:
+    """シミュレーション状態を管理するシングルトンクラス"""
+    _instance: Optional['SimulationManager'] = None
 
-# ネットワークベースシミュレーション用のグローバル変数
-network_based_simulator: Optional['NetworkBasedSimulator'] = None
-network_simulation_task: Optional[asyncio.Task] = None
+    def __new__(cls) -> 'SimulationManager':
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
+
+    def __init__(self):
+        if self._initialized:
+            return
+        self._initialized = True
+
+        # シミュレーションエンジン
+        self.simulation_engine: Optional[SimulationEngine] = None
+        self.simulation_task: Optional[asyncio.Task] = None
+
+        # マスターシミュレータ
+        self.master_simulator: Optional[MasterSimulator] = None
+        self.simulation_results: Dict[str, SimulationResults] = {}
+
+        # ネットワークベースシミュレータ
+        self.network_based_simulator: Optional['NetworkBasedSimulator'] = None
+        self.network_simulation_task: Optional[asyncio.Task] = None
+
+    def reset(self):
+        """シミュレーション状態をリセット"""
+        self.simulation_engine = None
+        self.simulation_task = None
+        self.master_simulator = None
+        self.network_based_simulator = None
+        self.network_simulation_task = None
+
+    def is_running(self) -> bool:
+        """いずれかのシミュレーションが実行中かどうか"""
+        if self.simulation_engine and self.simulation_engine.is_running:
+            return True
+        if self.network_based_simulator:
+            return True
+        return False
+
+
+# シングルトンインスタンス
+sim_manager = SimulationManager()
+
+# 後方互換性のためのエイリアス（段階的に削除予定）
+simulation_engine = None  # sim_manager.simulation_engine を使用
+simulation_task = None  # sim_manager.simulation_task を使用
+master_simulator = None  # sim_manager.master_simulator を使用
+simulation_results: Dict[str, SimulationResults] = {}  # sim_manager.simulation_results を使用
+network_based_simulator = None  # sim_manager.network_based_simulator を使用
+network_simulation_task = None  # sim_manager.network_simulation_task を使用
 
 # ネットワークベースシミュレーション用の設定
 class NetworkSimulationConfig(BaseModel):
     start_time: str
-    speed: float = 1.0
-    duration: float = 3600.0  # 1時間
+    speed: float = simulation_settings.default_time_scale
+    duration: float = simulation_settings.default_duration
     network_data: dict  # フロントエンドから送信されるネットワークデータ
     simulation_mode: str = "normal"  # "normal", "test", "optimization"
     enable_scheduling_control: bool = True  # スケジューリング制御の有効/無効
@@ -60,7 +153,7 @@ class SimulationConfig(BaseModel):
     """シミュレーション設定"""
     start_time: str = "2024-01-01T08:00:00"
     duration: Optional[float] = None  # None = 無制限
-    speed: float = 1.0
+    speed: float = simulation_settings.default_time_scale
     network_data: Optional[Dict[str, Any]] = None  # ネットワークエディターからのデータ
 
 class SimulationStatus(BaseModel):
@@ -237,83 +330,113 @@ async def start_simulation(config: SimulationConfig, background_tasks: Backgroun
     import app.api.websocket_api as ws_api
     import logging
     logger = logging.getLogger(__name__)
-    
+
     try:
         # 全てのシミュレーションエンジンを停止
         global simulation_engine, master_simulator, network_based_simulator, simulation_task, network_simulation_task
-        
+
         # 古いSimulationEngineを停止
         if simulation_engine:
             try:
                 await simulation_engine.stop()
-                logger.info("古いSimulationEngineを停止しました")
-            except:
+            except Exception:
                 pass
             simulation_engine = None
-            
+
         # MasterSimulatorを停止
         if master_simulator:
             try:
                 await master_simulator.stop_simulation()
-                logger.info("MasterSimulatorを停止しました")
-            except:
+            except Exception:
                 pass
             master_simulator = None
-            
+
         # NetworkBasedSimulatorを停止
         if network_based_simulator:
             try:
                 await network_based_simulator.stop()
-                logger.info("NetworkBasedSimulatorを停止しました")
-            except:
+            except Exception:
                 pass
             network_based_simulator = None
-            
+
         # タスクをキャンセル
         if simulation_task and not simulation_task.done():
             simulation_task.cancel()
             simulation_task = None
-            
         if network_simulation_task and not network_simulation_task.done():
             network_simulation_task.cancel()
             network_simulation_task = None
-        
+
         # 既存のenhanced_simulatorも停止
         if ws_api.enhanced_simulator:
             try:
                 await ws_api.enhanced_simulator.stop_simulation()
-                logger.info("既存のenhanced_simulatorを停止しました")
-            except:
+            except Exception:
                 pass
-        
+
         # 新しいenhanced_simulatorを作成
         from app.core.enhanced_simulator import EnhancedSimulationEngine
-        factory = create_sample_factory()
-        ws_api.enhanced_simulator = EnhancedSimulationEngine(factory=factory)
-        
+
+        # ネットワークデータが提供されている場合はそれを使用
+        if config.network_data:
+            nd = config.network_data
+            logger.info(f"[DEBUG] network_data received: nodes={len(nd.get('nodes',[]))}, edges={len(nd.get('edges',[]))}")
+            for n in nd.get('nodes', [])[:3]:
+                logger.info(f"[DEBUG]   node: id={n.get('id')} type={n.get('type')} data_keys={list(n.get('data',{}).keys())}")
+            factory = Factory(
+                id="temp_factory",
+                name="Temp",
+                description="Will be rebuilt from network data",
+            )
+            ws_api.enhanced_simulator = EnhancedSimulationEngine(factory=factory)
+            ws_api.enhanced_simulator.build_factory_from_network(config.network_data)
+            # デバッグ: 初期在庫確認
+            for bid, buf in ws_api.enhanced_simulator.factory.buffers.items():
+                q = buf.get_total_quantity()
+                if q > 0:
+                    logger.info(f"[DEBUG] Initial buffer: {bid} = {q}")
+            logger.info(f"[DEBUG] Store feeds: {len(getattr(ws_api.enhanced_simulator, '_store_feeds', []))}")
+            logger.info(f"[DEBUG] Start processes: {ws_api.enhanced_simulator._start_processes}")
+            logger.info("ネットワークデータから工場モデルを構築しました")
+        else:
+            # ネットワークデータがない場合はサンプル工場を使用
+            factory = create_sample_factory()
+            ws_api.enhanced_simulator = EnhancedSimulationEngine(factory=factory)
+            logger.info("サンプル工場データを使用します")
+
+        # WebSocketブロードキャスト用のイベントハンドラーを登録
+        from app.api.websocket_api import WebSocketEventHandler
+        ws_handler = WebSocketEventHandler()
+        ws_api.enhanced_simulator.event_manager.register_handler(ws_handler)
+
         enhanced_simulator = ws_api.enhanced_simulator
-            
+
+        # duration: Noneの場合は3600秒（1時間）をデフォルトにする
+        sim_duration = config.duration if config.duration else 3600.0
+
         # シミュレーション開始
-        success = await enhanced_simulator.start_simulation(config.duration)
-        
+        success = await enhanced_simulator.start_simulation(sim_duration)
+
         if success:
+            sim_id = enhanced_simulator.state.simulation_id
             return {
                 "success": True,
                 "message": "シミュレーションが開始されました",
                 "engine_type": "enhanced",
-                "simulation_id": str(enhanced_simulator.state.simulation_id),
-                "config": config.dict()
+                "simulation_id": str(sim_id),
+                "config": config.dict(),
             }
         else:
             return {
                 "success": False,
-                "message": "シミュレーションの開始に失敗しました"
+                "message": "シミュレーションの開始に失敗しました",
             }
-        
+
     except Exception as e:
+        logger.error(f"シミュレーション開始エラー: {e}", exc_info=True)
         return {
             "success": False,
-            "message": f"シミュレーション開始エラー: {str(e)}"
+            "message": f"シミュレーション開始エラー: {str(e)}",
         }
 
 @router.post("/pause")
@@ -372,11 +495,28 @@ async def stop_simulation():
     except Exception as e:
         return {"success": False, "message": f"停止エラー: {str(e)}"}
 
+@router.get("/results")
+async def get_simulation_results_api():
+    """シミュレーション結果を取得"""
+    import app.api.websocket_api as ws_api
+    if not ws_api.enhanced_simulator:
+        raise HTTPException(status_code=400, detail="シミュレーションが存在しません")
+    return ws_api.enhanced_simulator.get_results()
+
+@router.post("/speed")
+async def set_speed(speed: float):
+    """シミュレーション速度を変更"""
+    import app.api.websocket_api as ws_api
+    if not ws_api.enhanced_simulator:
+        raise HTTPException(status_code=400, detail="シミュレーションが存在しません")
+    ws_api.enhanced_simulator.set_speed(speed)
+    return {"speed": speed}
+
 @router.get("/status")
 async def get_simulation_status():
-    """シミュレーション状態を取得（enhanced_simulatorを使用）"""
+    """シミュレーション状態を取得"""
     import app.api.websocket_api as ws_api
-    
+
     if not ws_api.enhanced_simulator:
         return {
             "status": "idle",
@@ -395,20 +535,6 @@ async def get_simulation_status():
         "is_running": state.status == "running",
         "progress": state.progress
     }
-
-@router.post("/speed")
-async def set_simulation_speed(speed: float):
-    """シミュレーション速度を設定"""
-    global simulation_engine
-    
-    if not simulation_engine:
-        raise HTTPException(status_code=400, detail="シミュレーションが開始されていません")
-        
-    try:
-        simulation_engine.set_speed(speed)
-        return {"message": f"シミュレーション速度が{speed}倍に設定されました", "speed": speed}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"速度設定エラー: {str(e)}")
 
 @router.get("/data")
 async def get_simulation_data():
@@ -568,7 +694,7 @@ async def start_master_simulation(config: MasterSimulationConfigRequest, backgro
                 if results:
                     simulation_results[simulation_id] = results
             except Exception as e:
-                print(f"シミュレーション実行エラー: {e}")
+                logger.error(f"Simulation execution error: {e}")
                 
         background_tasks.add_task(run_simulation)
         
@@ -841,18 +967,18 @@ async def validate_network_data(network_data: dict):
             })
         
         # 循環参照の検出
-        if network_based_simulator._detect_cycles(edges):
+        if _detect_cycles(edges):
             validation_result["errors"].append({
                 "type": "circular_reference",
                 "message": "循環参照が検出されました",
                 "severity": "error"
             })
             validation_result["is_valid"] = False
-        
+
         # 材料フローの検証
-        flow_validation = network_based_simulator._validate_material_flow(nodes, edges)
+        flow_validation = _validate_material_flow(nodes, edges)
         validation_result["summary"]["material_flow"] = flow_validation
-        
+
         if not flow_validation["is_valid"]:
             validation_result["errors"].extend(flow_validation["errors"])
             validation_result["is_valid"] = False
@@ -878,31 +1004,50 @@ async def convert_network_data(network_data: dict):
             }
         }
         
-        # ノードの変換
+        # ノードの変換（データをそのまま通す）
         for node in network_data.get('nodes', []):
             converted_node = {
                 "id": node.get('id'),
                 "type": node.get('type', 'unknown'),
-                "data": network_based_simulator._convert_node_data(node.get('data', {})),
-                "position": node.get('position')
+                "data": node.get('data', {}),
+                "position": node.get('position'),
             }
             converted_data["nodes"].append(converted_node)
-        
+
         # エッジの変換
         for edge in network_data.get('edges', []):
             converted_edge = {
                 "id": edge.get('id'),
                 "source": edge.get('source'),
                 "target": edge.get('target'),
-                "data": network_based_simulator._convert_edge_data(edge.get('data', {}))
+                "data": edge.get('data', {}),
             }
             converted_data["edges"].append(converted_edge)
-        
-        # 製品情報の変換
-        converted_data["products"] = network_based_simulator._extract_products(network_data)
-        
-        # BOM情報の変換
-        converted_data["bom_items"] = network_based_simulator._extract_bom_items(network_data)
+
+        # 製品情報の抽出
+        for node in network_data.get('nodes', []):
+            if node.get('type') in ['machining', 'assembly', 'inspection']:
+                nd = node.get('data', {})
+                converted_data["products"].append({
+                    "id": f"PRODUCT_{node.get('id')}",
+                    "name": nd.get('label', f'Product {node.get("id")}'),
+                    "type": "component" if node.get('type') == 'machining' else "assembly",
+                    "processing_time": nd.get('cycleTime', 60),
+                    "source_process": node.get('id'),
+                })
+
+        # BOM情報の抽出
+        for edge in network_data.get('edges', []):
+            src = next((n for n in network_data.get('nodes', []) if n.get('id') == edge.get('source')), None)
+            tgt = next((n for n in network_data.get('nodes', []) if n.get('id') == edge.get('target')), None)
+            if src and tgt:
+                converted_data["bom_items"].append({
+                    "id": f"BOM_{edge.get('id')}",
+                    "parent_product": f"PRODUCT_{tgt.get('id')}",
+                    "child_product": f"PRODUCT_{src.get('id')}",
+                    "quantity": 1,
+                    "source_edge": edge.get('id'),
+                })
         
         return {
             "status": "success",
@@ -1163,10 +1308,8 @@ async def get_sample_network_data():
         ]
     }
 
-def _detect_cycles(self, edges: List[dict]) -> bool:
+def _detect_cycles(edges: List[dict]) -> bool:
     """循環参照を検出"""
-    # 簡易的な循環参照検出
-    # 実際の実装では、より高度なアルゴリズムを使用
     graph = {}
     for edge in edges:
         source = edge.get('source')
@@ -1174,215 +1317,82 @@ def _detect_cycles(self, edges: List[dict]) -> bool:
         if source not in graph:
             graph[source] = []
         graph[source].append(target)
-    
-    # 深さ優先探索で循環を検出
+
     visited = set()
     rec_stack = set()
-    
+
     def has_cycle(node):
         if node in rec_stack:
             return True
         if node in visited:
             return False
-        
         visited.add(node)
         rec_stack.add(node)
-        
         for neighbor in graph.get(node, []):
             if has_cycle(neighbor):
                 return True
-        
         rec_stack.remove(node)
         return False
-    
+
     for node in graph:
         if has_cycle(node):
             return True
-    
     return False
 
-def _validate_material_flow(self, nodes: List[dict], edges: List[dict]) -> dict:
+
+def _validate_material_flow(nodes: List[dict], edges: List[dict]) -> dict:
     """材料フローの妥当性を検証"""
-    validation = {
-        "is_valid": True,
-        "errors": [],
-        "warnings": []
-    }
-    
-    # 工程ノードの検証
+    validation = {"is_valid": True, "errors": [], "warnings": []}
+
     process_nodes = [n for n in nodes if n.get('type') in ['machining', 'assembly', 'inspection']]
-    
+
     for process_node in process_nodes:
         node_id = process_node.get('id')
         node_data = process_node.get('data', {})
-        
-        # 必須パラメータの検証
-        required_params = ['cycleTime', 'equipmentCount']
-        for param in required_params:
+
+        for param in ['cycleTime', 'equipmentCount']:
             if param not in node_data:
                 validation["errors"].append({
-                    "node_id": node_id,
-                    "param": param,
-                    "message": f"必須パラメータ '{param}' が設定されていません",
-                    "severity": "error"
+                    "node_id": node_id, "param": param,
+                    "message": f"必須パラメータ '{param}' が設定されていません", "severity": "error"
                 })
                 validation["is_valid"] = False
-        
-        # 数値パラメータの妥当性検証
+
         if 'cycleTime' in node_data:
-            cycle_time = node_data['cycleTime']
-            if not isinstance(cycle_time, (int, float)) or cycle_time <= 0:
+            ct = node_data['cycleTime']
+            if not isinstance(ct, (int, float)) or ct <= 0:
                 validation["errors"].append({
-                    "node_id": node_id,
-                    "param": "cycleTime",
-                    "message": f"サイクルタイムは正の数値である必要があります: {cycle_time}",
-                    "severity": "error"
+                    "node_id": node_id, "param": "cycleTime",
+                    "message": f"サイクルタイムは正の数値である必要があります: {ct}", "severity": "error"
                 })
                 validation["is_valid"] = False
-        
+
         if 'equipmentCount' in node_data:
-            equipment_count = node_data['equipmentCount']
-            if not isinstance(equipment_count, int) or equipment_count <= 0:
+            ec = node_data['equipmentCount']
+            if not isinstance(ec, int) or ec <= 0:
                 validation["errors"].append({
-                    "node_id": node_id,
-                    "param": "equipmentCount",
-                    "message": f"設備数は正の整数である必要があります: {equipment_count}",
-                    "severity": "error"
+                    "node_id": node_id, "param": "equipmentCount",
+                    "message": f"設備数は正の整数である必要があります: {ec}", "severity": "error"
                 })
                 validation["is_valid"] = False
-    
-    # 接続関係の検証
+
     for edge in edges:
         source_id = edge.get('source')
         target_id = edge.get('target')
-        
-        # 存在しないノードへの接続
-        source_exists = any(n.get('id') == source_id for n in nodes)
-        target_exists = any(n.get('id') == target_id for n in nodes)
-        
-        if not source_exists:
+        if not any(n.get('id') == source_id for n in nodes):
             validation["errors"].append({
                 "edge_id": edge.get('id'),
-                "message": f"接続元ノード '{source_id}' が存在しません",
-                "severity": "error"
+                "message": f"接続元ノード '{source_id}' が存在しません", "severity": "error"
             })
             validation["is_valid"] = False
-        
-        if not target_exists:
+        if not any(n.get('id') == target_id for n in nodes):
             validation["errors"].append({
                 "edge_id": edge.get('id'),
-                "message": f"接続先ノード '{target_id}' が存在しません",
-                "severity": "error"
+                "message": f"接続先ノード '{target_id}' が存在しません", "severity": "error"
             })
             validation["is_valid"] = False
-    
+
     return validation
-
-def _convert_node_data(self, node_data: dict) -> dict:
-    """ノードデータをシミュレーション用に変換"""
-    converted = {}
-    
-    # 基本パラメータの変換
-    param_mapping = {
-        'cycleTime': 'cycleTime',
-        'setupTime': 'setupTime',
-        'equipmentCount': 'equipmentCount',
-        'operatorCount': 'operatorCount',
-        'inputBufferCapacity': 'inputBufferCapacity',
-        'outputBufferCapacity': 'outputBufferCapacity',
-        'defectRate': 'defectRate',
-        'reworkRate': 'reworkRate',
-        'operatingCost': 'operatingCost'
-    }
-    
-    for source_key, target_key in param_mapping.items():
-        if source_key in node_data:
-            converted[target_key] = node_data[source_key]
-    
-    # スケジューリング設定の変換
-    if 'schedulingMode' in node_data:
-        converted['schedulingMode'] = node_data['schedulingMode']
-    
-    if 'batchSize' in node_data:
-        converted['batchSize'] = node_data['batchSize']
-    
-    if 'minBatchSize' in node_data:
-        converted['minBatchSize'] = node_data['minBatchSize']
-    
-    if 'maxBatchSize' in node_data:
-        converted['maxBatchSize'] = node_data['maxBatchSize']
-    
-    # かんばん設定の変換
-    if node_data.get('kanbanEnabled', False):
-        converted['kanbanEnabled'] = True
-        converted['kanbanCardCount'] = node_data.get('kanbanCardCount', 5)
-        converted['reorderPoint'] = node_data.get('reorderPoint', 10)
-        converted['maxInventory'] = node_data.get('maxInventory', 50)
-        converted['supplierLeadTime'] = node_data.get('supplierLeadTime', 3)
-        converted['kanbanType'] = node_data.get('kanbanType', 'production')
-    
-    return converted
-
-def _convert_edge_data(self, edge_data: dict) -> dict:
-    """エッジデータをシミュレーション用に変換"""
-    converted = {}
-    
-    # 搬送設定の変換
-    param_mapping = {
-        'transportTime': 'transportTime',
-        'transportLotSize': 'transportLotSize',
-        'transportCost': 'transportCost',
-        'distance': 'distance',
-        'transportType': 'transportType',
-        'maxCapacity': 'maxCapacity'
-    }
-    
-    for source_key, target_key in param_mapping.items():
-        if source_key in edge_data:
-            converted[target_key] = edge_data[source_key]
-    
-    return converted
-
-def _extract_products(self, network_data: dict) -> List[dict]:
-    """ネットワークデータから製品情報を抽出"""
-    products = []
-    
-    # ノードから製品情報を抽出
-    for node in network_data.get('nodes', []):
-        if node.get('type') in ['machining', 'assembly', 'inspection']:
-            node_data = node.get('data', {})
-            
-            product = {
-                "id": f"PRODUCT_{node.get('id')}",
-                "name": node_data.get('label', f'Product {node.get("id")}'),
-                "type": "component" if node.get('type') == 'machining' else "assembly",
-                "processing_time": node_data.get('cycleTime', 60),
-                "source_process": node.get('id')
-            }
-            products.append(product)
-    
-    return products
-
-def _extract_bom_items(self, network_data: dict) -> List[dict]:
-    """ネットワークデータからBOM情報を抽出"""
-    bom_items = []
-    
-    # エッジからBOM関係を抽出
-    for edge in network_data.get('edges', []):
-        source_node = next((n for n in network_data.get('nodes', []) if n.get('id') == edge.get('source')), None)
-        target_node = next((n for n in network_data.get('nodes', []) if n.get('id') == edge.get('target')), None)
-        
-        if source_node and target_node:
-            bom_item = {
-                "id": f"BOM_{edge.get('id')}",
-                "parent_product": f"PRODUCT_{target_node.get('id')}",
-                "child_product": f"PRODUCT_{source_node.get('id')}",
-                "quantity": 1,  # デフォルト値
-                "source_edge": edge.get('id')
-            }
-            bom_items.append(bom_item)
-    
-    return bom_items
 
 async def monitor_network_simulation(simulator: 'NetworkBasedSimulator', duration: float):
     """ネットワークベースシミュレーションの監視"""
@@ -1398,4 +1408,4 @@ async def monitor_network_simulation(simulator: 'NetworkBasedSimulator', duratio
         # タスクがキャンセルされた場合
         pass
     except Exception as e:
-        print(f"シミュレーション監視エラー: {e}")
+        logger.error(f"Simulation monitoring error: {e}")

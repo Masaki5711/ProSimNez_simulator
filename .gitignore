@@ -42,4 +42,4 @@ data/output/*
 *.db
 
 # Docker
-.dockerignore
+.dockerignorenul

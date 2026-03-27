@@ -150,12 +150,18 @@ class WebSocketManager:
         """全クライアントにメッセージをブロードキャスト"""
         sent_count = 0
         client_ids = list(self.connections.keys())  # コピーを作成
-        
+
         for client_id in client_ids:
             if await self.send_to_client(client_id, message):
                 sent_count += 1
-                
+
         return sent_count
+
+    async def broadcast_to_all(self, message) -> int:
+        """全クライアントにメッセージをブロードキャスト（文字列またはdict対応）"""
+        if isinstance(message, str):
+            message = json.loads(message)
+        return await self.broadcast(message)
         
     async def _heartbeat_loop(self):
         """ハートビートループ - 非アクティブな接続を検出"""
@@ -295,7 +301,7 @@ class RealtimeDataManager:
                 self._subscribe_to_channels()
             )
         else:
-            print("Redis未接続のため、リアルタイム配信はWebSocketのみで動作します")
+            logger.info("Redis not connected, realtime broadcast will use WebSocket only")
             
     async def shutdown(self):
         """システムを終了"""
@@ -425,6 +431,16 @@ class RealtimeDataManager:
             
         return await self.redis_cache.get_data(cache_key)
         
+    async def broadcast_kpis(self, kpi_data: Dict[str, Any]):
+        """KPIデータをWebSocketでブロードキャスト"""
+        message = {
+            "type": "kpi_update",
+            "event_type": "kpi_update",
+            "data": kpi_data,
+            "timestamp": datetime.now().isoformat()
+        }
+        await self.websocket_manager.broadcast(message)
+
     async def get_latest_kpis(self, project_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """最新のKPIを取得"""
         return await self.get_cached_data("latest_kpis", project_id)

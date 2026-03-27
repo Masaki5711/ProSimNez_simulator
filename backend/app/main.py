@@ -3,9 +3,15 @@ FastAPI メインアプリケーション
 """
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List
 import json
+import logging
 from datetime import datetime
+
+# ロガーの設定
+logger = logging.getLogger(__name__)
+
+# 設定のインポート
+from app.config import app_settings
 
 # APIルーターのインポート
 from app.api import simulation, network, auth, projects
@@ -26,50 +32,34 @@ async def startup_event():
     # リアルタイムデータマネージャーを初期化
     from app.api.websocket_api import realtime_manager
     await realtime_manager.initialize()
-    print("リアルタイムデータマネージャーを初期化しました")
+    logger.info("Realtime data manager initialized")
 
 @app.on_event("shutdown")  
 async def shutdown_event():
     """アプリケーション終了時のクリーンアップ"""
     from app.api.websocket_api import realtime_manager
     await realtime_manager.shutdown()
-    print("リアルタイムデータマネージャーを終了しました")
+    logger.info("Realtime data manager shutdown")
 
-# CORS設定
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Reactのデフォルトポート
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CORS設定 - 全オリジン許可（開発用）
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request as StarletteRequest
+from starlette.responses import Response as StarletteResponse
 
-# WebSocket接続管理
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: List[WebSocket] = []
+class CORSAllowAll(BaseHTTPMiddleware):
+    async def dispatch(self, request: StarletteRequest, call_next):
+        if request.method == "OPTIONS":
+            response = StarletteResponse(status_code=200)
+        else:
+            response = await call_next(request)
+        origin = request.headers.get("origin", "*")
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
+        return response
 
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
-
-    async def send_personal_message(self, message: str, websocket: WebSocket):
-        await websocket.send_text(message)
-
-    async def broadcast(self, message: str):
-        for connection in self.active_connections:
-            await connection.send_text(message)
-
-manager = ConnectionManager()
-
-# レガシーWebSocketイベントリスナー（無効化）
-async def websocket_event_listener(event):
-    """レガシーシミュレーションイベントリスナー - 無効化済み"""
-    # enhanced_simulatorに統合されたため、このリスナーは使用しない
-    pass
+app.add_middleware(CORSAllowAll)
 
 @app.get("/")
 async def root():
@@ -79,32 +69,68 @@ async def root():
 async def health_check():
     return {"status": "healthy"}
 
-# 簡易WebSocketエンドポイント（基本機能のみ）
+# 基本WebSocketエンドポイント（realtime_managerを使用）
 @app.websocket("/ws/simulation")
 async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
+    """基本的なシミュレーションWebSocketエンドポイント"""
+    import uuid
+    from app.api.websocket_api import realtime_manager
+
+    client_id = str(uuid.uuid4())
+    connection = await realtime_manager.websocket_manager.connect(websocket, client_id)
+
     try:
         # 接続確認メッセージを送信
-        await manager.send_personal_message(json.dumps({
+        await realtime_manager.websocket_manager.send_to_client(client_id, {
             "type": "connection_established",
-            "message": "WebSocket接続が確立されました",
+            "message": "WebSocket connection established",
+            "client_id": client_id,
             "timestamp": datetime.now().isoformat()
-        }), websocket)
-        
+        })
+
         while True:
             # クライアントからのメッセージを受信
             data = await websocket.receive_text()
             message = json.loads(data)
-            
-            # 基本的な応答のみ
-            response = {"type": "message_received", "original_type": message.get("type", "unknown")}
-            await manager.send_personal_message(json.dumps(response), websocket)
-                
+
+            # ping/pongハンドリング
+            if message.get("type") == "ping":
+                await realtime_manager.websocket_manager.send_to_client(client_id, {
+                    "type": "pong",
+                    "timestamp": datetime.now().isoformat()
+                })
+            elif message.get("type") == "simulation_start":
+                # シミュレーション開始コマンドをwebsocket_apiのハンドラに委譲
+                from app.api.websocket_api import _handle_client_message
+                await _handle_client_message(message, connection, None)
+            elif message.get("type") == "simulation_control":
+                # シミュレーション制御コマンド
+                from app.api.websocket_api import enhanced_simulator
+                control = message.get("control")
+                if control == "pause" and enhanced_simulator:
+                    await enhanced_simulator.pause_simulation()
+                elif control == "resume" and enhanced_simulator:
+                    await enhanced_simulator.resume_simulation()
+                elif control == "stop" and enhanced_simulator:
+                    await enhanced_simulator.stop_simulation()
+            elif message.get("type") == "subscribe_realtime":
+                # リアルタイムデータ購読（現在はすべてのクライアントが自動的に受信）
+                await realtime_manager.websocket_manager.send_to_client(client_id, {
+                    "type": "subscription_confirmed",
+                    "timestamp": datetime.now().isoformat()
+                })
+            else:
+                # その他のメッセージに応答
+                await realtime_manager.websocket_manager.send_to_client(client_id, {
+                    "type": "message_received",
+                    "original_type": message.get("type", "unknown")
+                })
+
     except WebSocketDisconnect:
-        manager.disconnect(websocket)
+        await realtime_manager.websocket_manager.disconnect(client_id)
     except Exception as e:
-        print(f"WebSocketエラー: {e}")
-        manager.disconnect(websocket)
+        logger.error(f"WebSocket error: {e}")
+        await realtime_manager.websocket_manager.disconnect(client_id)
 
 # APIルーターの登録
 app.include_router(auth.router, prefix="/api/auth", tags=["authentication"])

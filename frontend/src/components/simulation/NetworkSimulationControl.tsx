@@ -418,16 +418,16 @@ const NetworkSimulationControl: React.FC = () => {
     try {
       setIsLoading(true);
       setError(null);
+
+      // Enhanced Simulatorを使用（WebSocketリアルタイム配信付き）
       const config = {
         start_time: new Date().toISOString(),
         duration: duration,
+        speed: 1,
         network_data: network.networkData,
-        enable_scheduling_control: enableSchedulingControl,
-        enable_real_time_update: enableRealTimeUpdate,
-        simulation_mode: simulationMode,
       };
-      
-      const result = await networkSimulationApi.startNetworkSimulation(config);
+
+      const result = await networkSimulationApi.startWithNetworkData(config);
       dispatch(startNetworkSimulation({ id: result.simulation_id, data: network.networkData }));
       console.log('ネットワークシミュレーション開始:', result);
     } catch (err) {

@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 import json
 
+from app.config import simulation_settings
 from app.core.data_integration import DataIntegrationEngine, DynamicConfigurationManager
 from app.core.enhanced_simulator import EnhancedSimulationEngine
 from app.websocket.realtime_manager import RealtimeDataManager
@@ -26,8 +27,8 @@ class NetworkDataRequest(BaseModel):
 class SimulationRequest(BaseModel):
     """シミュレーション実行リクエスト"""
     project_id: str
-    duration: float = 3600.0  # デフォルト1時間
-    speed: float = 1.0
+    duration: float = simulation_settings.default_duration
+    speed: float = simulation_settings.default_time_scale
     
 class ConfigurationUpdateRequest(BaseModel):
     """設定更新リクエスト"""

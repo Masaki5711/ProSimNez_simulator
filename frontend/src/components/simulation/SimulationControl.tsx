@@ -20,12 +20,32 @@ import { RootState } from '../../store';
 import { startSimulation, pauseSimulation, stopSimulation } from '../../store/slices/simulationSlice';
 import { simulationApi, networkSimulationApi } from '../../api/simulationApi';
 import { BufferUtils } from '../../utils/bufferUtils';
+import { setNetworkData } from '../../store/projectSlice';
+import { getFactoryDemoData } from '../../data/factoryDemo';
 
 const SimulationControl: React.FC = () => {
   const dispatch = useDispatch();
   const { isRunning, isPaused } = useSelector((state: RootState) => state.simulation);
   const { networkData } = useSelector((state: RootState) => state.project);
-  
+
+  // 起動時にlocalStorageからネットワークデータを自動読み込み
+  React.useEffect(() => {
+    if (!networkData) {
+      try {
+        const saved = localStorage.getItem('project_1_network');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed.nodes && parsed.nodes.length > 0) {
+            dispatch(setNetworkData(parsed));
+            console.log('Auto-loaded network data from localStorage');
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to auto-load network data:', e);
+      }
+    }
+  }, [dispatch, networkData]);
+
   // 製品IDから製品名を取得する関数
   const getProductNameById = (productId: string): string => {
     console.log(`🔍 Looking up product name for ID: "${productId}"`);
@@ -115,7 +135,8 @@ const SimulationControl: React.FC = () => {
     if (!networkData.nodes || networkData.nodes.length === 0) {
       return { isValid: false, message: 'ノードがありません。ネットワーク設計タブで工程ノードを追加してください。' };
     }
-    const processNodes = networkData.nodes.filter(node => node.type === 'process');
+    const processTypes = ['process', 'machining', 'assembly', 'inspection', 'kitting', 'shipping'];
+    const processNodes = networkData.nodes.filter((node: any) => processTypes.includes(node.type));
     if (processNodes.length === 0) {
       return { isValid: false, message: '工程ノードがありません。シミュレーションには少なくとも1つの工程ノードが必要です。' };
     }
@@ -137,11 +158,11 @@ const SimulationControl: React.FC = () => {
       }
       
       console.log('ネットワークデータ:', networkData);
-      console.log('工程ノード数:', networkData?.nodes?.filter(n => n.type === 'process').length);
+      console.log('工程ノード数:', networkData?.nodes?.filter((n: any) => ['process','machining','assembly','inspection','kitting','shipping'].includes(n.type)).length);
       console.log('接続数:', networkData?.edges?.length || 0);
       
       // 詳細ログを追加
-      const processNodes = networkData?.nodes?.filter(n => n.type === 'process') || [];
+      const processNodes = networkData?.nodes?.filter((n: any) => ['process','machining','assembly','inspection','kitting','shipping'].includes(n.type)) || [];
       console.log('=== ネットワークデータ詳細確認 ===');
       
       // 全ノードの詳細を出力
@@ -172,23 +193,21 @@ const SimulationControl: React.FC = () => {
       
       console.log('=====================================');
       
-      // ネットワークシミュレーションAPIを使用
+      // Enhanced SimulatorのREST APIを使用（WebSocket経由でリアルタイムデータ配信）
       const config = {
         start_time: new Date().toISOString(),
-        duration: 300, // 5分間のシミュレーション（長めに設定）
+        duration: 600, // 10分間のシミュレーション
         speed: 1,
         network_data: {
           nodes: networkData?.nodes || [],
           edges: networkData?.edges || [],
           products: networkData?.products || []
         },
-        enable_scheduling_control: true,
-        enable_real_time_update: true
       };
-      
-      console.log('ネットワークシミュレーション開始:', config);
-      const result = await networkSimulationApi.startNetworkSimulation(config);
-      console.log('ネットワークシミュレーション結果:', result);
+
+      console.log('シミュレーション開始（Enhanced Engine）:', config);
+      const result = await simulationApi.start(config);
+      console.log('シミュレーション結果:', result);
       
       // API成功時にRedux状態更新（監視開始前に実行）
       dispatch(startSimulation());
@@ -366,7 +385,7 @@ const SimulationControl: React.FC = () => {
           // 生産活動がない場合は問題診断
           if (totalProduction === 0 && processCount === 0) {
             // ネットワーク設定の問題をチェック
-            const processNodes = networkData?.nodes?.filter(n => n.type === 'process') || [];
+            const processNodes = networkData?.nodes?.filter((n: any) => ['process','machining','assembly','inspection','kitting','shipping'].includes(n.type)) || [];
             const problemNodes = processNodes.filter(node => 
               (node.data?.equipmentCount || 0) === 0 || 
               (node.data?.cycleTime || 0) === 0
@@ -461,9 +480,30 @@ const SimulationControl: React.FC = () => {
             </Alert>
           )}
           
+          {/* デモデータ読み込みボタン */}
+          {!networkData && (
+            <Box sx={{ mb: 2 }}>
+              <Button
+                variant="contained"
+                color="secondary"
+                onClick={() => {
+                  const demoData = getFactoryDemoData();
+                  dispatch(setNetworkData(demoData));
+                  console.log('Demo data loaded:', demoData);
+                }}
+                sx={{ mr: 1 }}
+              >
+                BOM付きデモデータを読み込む
+              </Button>
+              <Typography variant="caption" color="text.secondary">
+                プレス→切削→サブ組立A / 射出成形→SMT→サブ組立B → 最終組立→検査
+              </Typography>
+            </Box>
+          )}
+
           {/* ネットワーク状態表示 */}
-          <Alert 
-            severity={validation.isValid ? 'success' : 'warning'} 
+          <Alert
+            severity={validation.isValid ? 'success' : 'warning'}
             sx={{ mb: 2 }}
           >
             {validation.message}

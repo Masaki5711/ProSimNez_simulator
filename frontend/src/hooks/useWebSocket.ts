@@ -22,21 +22,37 @@ export type LogCallback = (logEntry: {
 
 const WS_URL = process.env.REACT_APP_WS_URL || 'ws://localhost:8000/ws/simulation';
 
+// WebSocket再接続設定
+const WS_CONFIG = {
+  maxReconnectAttempts: 10,
+  baseReconnectInterval: 1000,  // 1秒
+  maxReconnectInterval: 30000,  // 最大30秒
+  reconnectBackoffMultiplier: 1.5,
+};
+
+// 指数バックオフで再接続間隔を計算
+const calculateReconnectDelay = (attemptNumber: number): number => {
+  const delay = Math.min(
+    WS_CONFIG.baseReconnectInterval * Math.pow(WS_CONFIG.reconnectBackoffMultiplier, attemptNumber),
+    WS_CONFIG.maxReconnectInterval
+  );
+  // ジッター（±10%）を追加してサーバー負荷を分散
+  const jitter = delay * 0.1 * (Math.random() * 2 - 1);
+  return Math.floor(delay + jitter);
+};
+
 export const useWebSocket = (onLog?: LogCallback) => {
   const dispatch = useDispatch();
   const ws = useRef<WebSocket | null>(null);
   const reconnectTimeout = useRef<NodeJS.Timeout | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [simulationStartTime, setSimulationStartTime] = useState<number>(0);
-  const maxReconnectAttempts = 5;
-  const reconnectInterval = 3000;
+  const reconnectAttemptRef = useRef<number>(0);
   const urlIndexRef = useRef<number>(0);
   const hasEverConnectedRef = useRef<boolean>(false);
   const candidateUrlsRef = useRef<string[]>([
     WS_URL,
     'ws://localhost:8000/ws/simulation',
-    'ws://127.0.0.1:8000/ws/simulation',
-    'ws://localhost:8000/api/websocket/ws/simulation/default'
   ]);
 
   const connect = useCallback(() => {
@@ -51,15 +67,16 @@ export const useWebSocket = (onLog?: LogCallback) => {
       ws.current = new WebSocket(urlToUse);
 
       ws.current.onopen = () => {
-        console.log('WebSocket接続成功');
+        console.log('WebSocket connected successfully');
         setIsConnected(true);
         dispatch(setWebSocketStatus(true));
         hasEverConnectedRef.current = true;
-        
+        reconnectAttemptRef.current = 0;  // 接続成功時にカウンターをリセット
+
         // 接続時にシミュレーション時間をリセット
         setSimulationStartTime(0);
         dispatch(setCurrentTime(0));
-        
+
         // 接続確認
         if (ws.current?.readyState === WebSocket.OPEN) {
           ws.current.send(JSON.stringify({ type: 'ping', timestamp: Date.now() }));
@@ -261,27 +278,47 @@ export const useWebSocket = (onLog?: LogCallback) => {
       };
 
       ws.current.onerror = (error) => {
-        console.error('WebSocketエラー:', error);
+        console.error('WebSocket error:', error);
         setIsConnected(false);
         dispatch(setWebSocketStatus(false));
       };
 
       ws.current.onclose = (event) => {
-        console.log('WebSocket接続終了:', event.code, event.reason);
+        console.log('WebSocket closed:', event.code, event.reason);
         setIsConnected(false);
         dispatch(setWebSocketStatus(false));
-        
-        // 異常切断時はURL候補を切り替え
-        if (event.code !== 1000) {
-          urlIndexRef.current = (urlIndexRef.current + 1) % candidateUrlsRef.current.length;
+
+        // 正常終了（code 1000）の場合は再接続しない
+        if (event.code === 1000) {
+          return;
         }
 
-        // 5秒後に再接続を試みる
+        // 再接続試行回数をチェック
+        if (reconnectAttemptRef.current >= WS_CONFIG.maxReconnectAttempts) {
+          console.error(`Max reconnect attempts (${WS_CONFIG.maxReconnectAttempts}) reached. Giving up.`);
+          onLog?.({
+            level: 'error',
+            category: 'system',
+            message: 'WebSocket connection failed after maximum retry attempts',
+            details: { attempts: reconnectAttemptRef.current }
+          });
+          return;
+        }
+
+        // URL候補を切り替え
+        urlIndexRef.current = (urlIndexRef.current + 1) % candidateUrlsRef.current.length;
+
+        // 指数バックオフで再接続
+        const delay = calculateReconnectDelay(reconnectAttemptRef.current);
+        reconnectAttemptRef.current += 1;
+
+        const nextUrl = candidateUrlsRef.current[urlIndexRef.current % candidateUrlsRef.current.length];
+        console.log(`Reconnecting in ${delay}ms (attempt ${reconnectAttemptRef.current}/${WS_CONFIG.maxReconnectAttempts})...`);
+
         reconnectTimeout.current = setTimeout(() => {
-          const nextUrl = candidateUrlsRef.current[urlIndexRef.current % candidateUrlsRef.current.length];
-          console.log(`再接続を試みています... (次: ${nextUrl})`);
+          console.log(`Attempting reconnection to: ${nextUrl}`);
           connect();
-        }, 5000);
+        }, delay);
       };
     } catch (error) {
       console.error('WebSocket接続エラー:', error);

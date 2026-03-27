@@ -12,6 +12,7 @@ export interface SimulationConfig {
   duration?: number; // 秒単位
   duration_minutes?: number; // 分単位
   speed: number;
+  network_data?: any; // ネットワークエディターからのデータ
 }
 
 export interface SimulationStatus {
@@ -154,29 +155,17 @@ export const networkApi = {
 export const networkSimulationApi = {
   // サンプルネットワークデータの取得
   getSampleData: async () => {
-    const response = await fetch('/api/simulation/network-simulation/sample-data');
-    if (!response.ok) {
-      throw new Error('サンプルデータの取得に失敗しました');
-    }
-    return response.json();
+    const response = await api.get('/simulation/network-simulation/sample-data');
+    return response.data;
   },
 
   // ネットワークデータの検証
   validateNetworkData: async (networkData: any) => {
-    const response = await fetch('/api/simulation/network-simulation/validate', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ network_data: networkData }),
-    });
-    if (!response.ok) {
-      throw new Error('ネットワークデータの検証に失敗しました');
-    }
-    return response.json();
+    const response = await api.post('/simulation/network-simulation/validate', networkData);
+    return response.data;
   },
 
-  // ネットワークシミュレーションの開始
+  // ネットワークシミュレーションの開始（REST API経由）
   startNetworkSimulation: async (config: {
     start_time: string;
     duration: number;
@@ -184,45 +173,36 @@ export const networkSimulationApi = {
     enable_scheduling_control: boolean;
     enable_real_time_update: boolean;
   }) => {
-    const response = await fetch('/api/simulation/start-network-simulation', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(config),
-    });
-    if (!response.ok) {
-      throw new Error('ネットワークシミュレーションの開始に失敗しました');
-    }
-    return response.json();
+    const response = await api.post('/simulation/start-network-simulation', config);
+    return response.data;
+  },
+
+  // EnhancedSimulatorを使用したシミュレーション開始（ネットワークデータ付き）
+  startWithNetworkData: async (config: {
+    start_time: string;
+    duration: number;
+    speed: number;
+    network_data: any;
+  }) => {
+    const response = await api.post('/simulation/start', config);
+    return response.data;
   },
 
   // ネットワークシミュレーションの状態取得
   getNetworkSimulationStatus: async () => {
-    const response = await fetch('/api/simulation/network-simulation/status');
-    if (!response.ok) {
-      throw new Error('シミュレーション状態の取得に失敗しました');
-    }
-    return response.json();
+    const response = await api.get('/simulation/network-simulation/status');
+    return response.data;
   },
 
   // ネットワークシミュレーションの停止
   stopNetworkSimulation: async () => {
-    const response = await fetch('/api/simulation/network-simulation/stop', {
-      method: 'POST',
-    });
-    if (!response.ok) {
-      throw new Error('シミュレーションの停止に失敗しました');
-    }
-    return response.json();
+    const response = await api.post('/simulation/network-simulation/stop');
+    return response.data;
   },
 
   // ネットワークシミュレーション結果の取得
   getNetworkSimulationResults: async () => {
-    const response = await fetch('/api/simulation/network-simulation/results');
-    if (!response.ok) {
-      throw new Error('シミュレーション結果の取得に失敗しました');
-    }
-    return response.json();
+    const response = await api.get('/simulation/network-simulation/results');
+    return response.data;
   },
 };

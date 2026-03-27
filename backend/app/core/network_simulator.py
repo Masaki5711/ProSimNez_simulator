@@ -5,10 +5,13 @@
 """
 import simpy
 import asyncio
+import logging
 import uuid
 from typing import Dict, List, Optional, Any, Callable
 from datetime import datetime, timedelta
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 from app.models.factory import Factory
 from app.models.process import Process, ProcessInput, KanbanSettings, Equipment
@@ -98,7 +101,7 @@ class NetworkBasedSimulator:
         self.products = self.network_data.get('products', [])
         self.bom_items = self.network_data.get('bom_items', [])
         
-        print(f"📊 ネットワーク解析完了: {len(self.nodes)}ノード, {len(self.edges)}エッジ")
+        logger.info(f"Network analysis complete: {len(self.nodes)} nodes, {len(self.edges)} edges")
     
     def _build_factory_model(self):
         """ネットワークデータから工場モデルを構築"""
@@ -120,7 +123,7 @@ class NetworkBasedSimulator:
         # 接続関係の設定
         self._setup_connections()
         
-        print(f"🏭 工場モデル構築完了: {len(self.factory.processes)}工程, {len(self.factory.buffers)}バッファ")
+        logger.info(f"Factory model built: {len(self.factory.processes)} processes, {len(self.factory.buffers)} buffers")
     
     def _add_products(self):
         """製品を工場モデルに追加"""
@@ -292,26 +295,47 @@ class NetworkBasedSimulator:
                 self.factory.connections[edge.id] = connection_info
     
     async def run_simulation(self, duration: float):
-        """シミュレーションを実行"""
+        """シミュレーションを非同期で実行（イベントループをブロックしない）"""
         self.is_running = True
         self.is_paused = False
-        
-        print(f"🚀 ネットワークベースシミュレーション開始: {duration}秒")
-        
+        self._duration = duration
+
+        logger.info(f"Network-based simulation started: {duration}s")
+
         try:
             # シミュレーション環境を初期化
             self._initialize_simulation()
-            
-            # シミュレーションを実行
-            self.env.run(until=duration)
-            
+
+            # SimPyをステップ実行して非同期で進める
+            step_size = 1.0  # 1秒ずつ進める
+            while self.is_running and self.env.now < duration:
+                # SimPyを1ステップ進める
+                next_time = min(self.env.now + step_size, duration)
+                self.env.run(until=next_time)
+
+                # イベントリスナーに進捗を通知
+                for listener in self.event_listeners:
+                    try:
+                        if asyncio.iscoroutinefunction(listener):
+                            await listener(SimulationEvent(
+                                timestamp=self.start_time + timedelta(seconds=self.env.now),
+                                event_type="progress_update",
+                                data={"simulation_time": self.env.now, "progress": self.env.now / duration},
+                            ))
+                    except Exception:
+                        pass
+
+                # イベントループに制御を戻す
+                await asyncio.sleep(0)
+
             # 結果を収集
             self._collect_simulation_results()
-            
-            print(f"✅ シミュレーション完了: {duration}秒")
-            
+            self.is_running = False
+
+            logger.info(f"Simulation completed: {duration}s")
+
         except Exception as e:
-            print(f"❌ シミュレーションエラー: {e}")
+            logger.error(f"Simulation error: {e}")
             self.is_running = False
             raise
     
@@ -363,7 +387,7 @@ class NetworkBasedSimulator:
                     self._update_scheduling_control(process)
                 
             except Exception as e:
-                print(f"工程 {process.id} でエラー: {e}")
+                logger.error(f"Process {process.id} error: {e}")
                 yield self.env.timeout(10)
     
     def _check_input_materials(self, process: Process) -> bool:
@@ -412,7 +436,7 @@ class NetworkBasedSimulator:
                 yield self.env.timeout(10)
                 
             except Exception as e:
-                print(f"スケジューリング制御エラー: {e}")
+                logger.error(f"Scheduling control error: {e}")
                 yield self.env.timeout(30)
     
     def _execute_scheduling_control(self, process: Process):
@@ -470,14 +494,14 @@ class NetworkBasedSimulator:
     
     def _setup_initial_inventory(self):
         """初期在庫を設定"""
-        print(f"🔧 初期在庫設定開始: {len(self.factory.buffers)}個のバッファ")
+        logger.info(f"Setting initial inventory: {len(self.factory.buffers)} buffers")
         
         # 全ての入力バッファに初期在庫を設定
         for buffer in self.factory.buffers.values():
             if "IN" in buffer.id:  # 入力バッファ
                 # 初期在庫を設定
                 buffer.add_lot("INITIAL_PRODUCT", "LOT_INITIAL", 50, "initial")
-                print(f"📦 初期在庫追加: {buffer.id} に 50個")
+                logger.debug(f"Initial inventory added: {buffer.id} = 50")
         
         # 開始工程（入力接続がない工程）を特定して追加在庫投入
         start_processes = []
@@ -486,14 +510,14 @@ class NetworkBasedSimulator:
             if len(incoming_edges) == 0:
                 start_processes.append(process)
         
-        print(f"🚀 開始工程特定: {len(start_processes)}個")
+        logger.info(f"Start processes identified: {len(start_processes)}")
         for process in start_processes:
             buffer_id = f"BUF_IN_{process.id}"
             if buffer_id in self.factory.buffers:
                 buffer = self.factory.buffers[buffer_id]
                 # 開始工程には大量の初期材料を投入
                 buffer.add_lot("START_MATERIAL", "LOT_START", 100, "start_process")
-                print(f"🎯 開始工程材料追加: {process.id} に 100個")
+                logger.debug(f"Start process material added: {process.id} = 100")
     
     def _log_event(self, event_type: str, process_id: str, equipment_id: str = None):
         """イベントを記録"""
@@ -515,7 +539,7 @@ class NetworkBasedSimulator:
                 else:
                     listener(event)
             except Exception as e:
-                print(f"イベントリスナーエラー: {e}")
+                logger.error(f"Event listener error: {e}")
     
     def _update_scheduling_control(self, process: Process):
         """スケジューリング制御を更新"""
@@ -604,7 +628,7 @@ class NetworkBasedSimulator:
     async def stop(self):
         """シミュレーションを停止"""
         self.is_running = False
-        print(f"🛑 シミュレーション停止: {self.simulation_id}")
+        logger.info(f"Simulation stopped: {self.simulation_id}")
     
     def get_status(self) -> str:
         """シミュレーションの状態を取得"""
@@ -621,7 +645,9 @@ class NetworkBasedSimulator:
     
     def get_progress(self) -> float:
         """シミュレーションの進捗を取得"""
-        # 進捗の計算ロジックを実装
+        duration = getattr(self, "_duration", 0)
+        if duration > 0:
+            return min(self.env.now / duration, 1.0)
         return 0.0
     
     def get_production_summary(self) -> Dict[str, Any]:

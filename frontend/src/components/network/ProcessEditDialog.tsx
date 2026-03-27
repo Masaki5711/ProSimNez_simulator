@@ -218,6 +218,28 @@ const ProcessEditDialog: React.FC<ProcessEditDialogProps> = ({
               <TextField
                 fullWidth
                 type="number"
+                label="サイクルタイム（秒）"
+                value={editData.cycleTime || 60}
+                onChange={handleChange('cycleTime')}
+                inputProps={{ min: 1 }}
+                helperText="1個あたりの加工時間"
+              />
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <TextField
+                fullWidth
+                type="number"
+                label="段取り時間（秒）"
+                value={editData.setupTime || 0}
+                onChange={handleChange('setupTime')}
+                inputProps={{ min: 0 }}
+                helperText="品種切替時の段取り替え時間"
+              />
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <TextField
+                fullWidth
+                type="number"
                 label="設備台数"
                 value={editData.equipmentCount}
                 onChange={handleChange('equipmentCount')}
@@ -234,28 +256,27 @@ const ProcessEditDialog: React.FC<ProcessEditDialogProps> = ({
                 inputProps={{ min: 0 }}
               />
             </Grid>
-            
-            <Grid item xs={12}>
-              <Alert severity="info">
-                <Typography variant="body2">
-                  💡 <strong>バッファ設定について</strong>
-                </Typography>
-                <Typography variant="body2" sx={{ mt: 1 }}>
-                  入力・出力バッファは「材料設定」タブで部品・製品ごとに個別に設定します。
-                  これにより、各材料や製品に最適なバッファサイズを設定できます。
-                </Typography>
-              </Alert>
+            <Grid item xs={12} md={6}>
+              <TextField
+                fullWidth
+                type="number"
+                label="入力バッファ容量（個）"
+                value={editData.inputBufferCapacity || 100}
+                onChange={handleChange('inputBufferCapacity')}
+                inputProps={{ min: 1 }}
+                helperText="この数を超えると上流からの搬送が停止"
+              />
             </Grid>
-            
-            {/* 注意書き */}
-            <Grid item xs={12}>
-              <Card variant="outlined" sx={{ bgcolor: 'info.50', borderColor: 'info.200' }}>
-                <CardContent>
-                  <Typography variant="body2" color="info.main">
-                    📋 <strong>注意:</strong> サイクルタイムは材料設定の出力製品ごとに個別設定してください。
-                  </Typography>
-                </CardContent>
-              </Card>
+            <Grid item xs={12} md={6}>
+              <TextField
+                fullWidth
+                type="number"
+                label="出力バッファ容量（個）"
+                value={editData.outputBufferCapacity || 50}
+                onChange={handleChange('outputBufferCapacity')}
+                inputProps={{ min: 1 }}
+                helperText="この数を超えると工程が停止(ブロック)"
+              />
             </Grid>
           </Grid>
         </TabPanel>

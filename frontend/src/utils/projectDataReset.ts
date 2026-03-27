@@ -1,200 +1,70 @@
 /**
  * プロジェクトデータリセット用ユーティリティ
+ * BOM構成付きデモプロジェクトを生成
  */
 import { Project } from '../types/projectTypes';
+import { getFactoryDemoData } from '../data/factoryDemo';
 
 export const resetProjectData = async (): Promise<void> => {
   console.log('=== プロジェクトデータリセット開始 ===');
-  
+
   // localStorageを完全にクリア
   localStorage.removeItem('projects');
+  localStorage.removeItem('project_1_network');
   console.log('localStorage cleared');
-  
+
   // デモプロジェクトを作成
   const demoProject: Project = {
     id: '1',
-    name: 'デモファクトリー',
-    description: '完全な生産ラインを含むデモンストレーション用ファクトリーです。原材料から出荷まで7つの工程を含みます。',
+    name: 'BOM付き工場デモ',
+    description:
+      'プレス→切削→サブ組立A / 射出成形→SMT→サブ組立B → 最終組立→検査 の混流生産ライン。' +
+      '完成品PROD-001はサブアセンブリA、サブアセンブリB、外装パネルから構成されます。',
     category: 'manufacturing',
-    tags: ['デモ', '完全な生産ライン', 'シミュレーション対応'],
+    tags: ['デモ', 'BOM', '混流生産', 'シミュレーション対応'],
     status: 'active',
     version: '2.0.0',
     createdBy: 'system',
     createdAt: new Date('2025-01-15T12:00:00.000Z'),
-    updatedAt: new Date('2025-01-15T12:00:00.000Z'),
+    updatedAt: new Date(),
   };
-  
-  console.log('Demo project created:', demoProject);
-  
-  // localStorageに強制保存
+
+  console.log('Demo project created:', demoProject.name);
+
+  // BOM付きデモネットワークデータを取得
+  const demoNetworkData = getFactoryDemoData();
+
+  // process_advanced_data を追加（各工程の詳細設定）
+  const networkDataWithAdvanced = {
+    ...demoNetworkData,
+    variants: [],
+    process_advanced_data: {
+      proc_press: { setup_time: 60, changeover_time: 120, efficiency: 0.92, mtbf: 480, mttr: 30 },
+      proc_cutting: { setup_time: 120, changeover_time: 180, efficiency: 0.88, mtbf: 360, mttr: 45 },
+      proc_sub_a: { setup_time: 90, changeover_time: 90, efficiency: 0.95, mtbf: 600, mttr: 20 },
+      proc_molding: { setup_time: 180, changeover_time: 240, efficiency: 0.90, mtbf: 300, mttr: 60 },
+      proc_smt: { setup_time: 300, changeover_time: 360, efficiency: 0.97, mtbf: 720, mttr: 90 },
+      proc_sub_b: { setup_time: 90, changeover_time: 90, efficiency: 0.94, mtbf: 600, mttr: 25 },
+      proc_final: { setup_time: 120, changeover_time: 150, efficiency: 0.93, mtbf: 480, mttr: 30 },
+      proc_inspect: { setup_time: 30, changeover_time: 30, efficiency: 0.99, mtbf: 1000, mttr: 10 },
+    },
+  };
+
   try {
+    // localStorageに保存
     localStorage.setItem('projects', JSON.stringify([demoProject]));
-    console.log('Project saved to localStorage');
-    
-    // デモファクトリーのネットワークデータも保存
-    const demoNetworkData = {
-      nodes: [
-        {
-          id: "raw_material_store",
-          type: "store",
-          label: "原材料倉庫",
-          name: "原材料倉庫",
-          capacity: 1000,
-          initialQuantity: 500,
-          bufferType: "input",
-          position: { x: 100, y: 200 }
-        },
-        {
-          id: "cutting_process",
-          type: "process",
-          label: "切断工程",
-          name: "切断工程",
-          processingTime: 30,
-          equipmentCount: 1,
-          quality: { defect_rate: 0.02 },
-          position: { x: 300, y: 200 }
-        },
-        {
-          id: "semi_finished_store",
-          type: "store",
-          label: "仕掛品倉庫",
-          name: "仕掛品倉庫",
-          capacity: 200,
-          initialQuantity: 50,
-          bufferType: "intermediate",
-          position: { x: 500, y: 200 }
-        },
-        {
-          id: "assembly_process",
-          type: "process",
-          label: "組立工程",
-          name: "組立工程",
-          processingTime: 45,
-          equipmentCount: 2,
-          quality: { defect_rate: 0.01 },
-          position: { x: 700, y: 200 }
-        },
-        {
-          id: "finished_goods_store",
-          type: "store",
-          label: "完成品倉庫",
-          name: "完成品倉庫",
-          capacity: 300,
-          initialQuantity: 20,
-          bufferType: "output",
-          position: { x: 900, y: 200 }
-        },
-        {
-          id: "inspection_process",
-          type: "process",
-          label: "検査工程",
-          name: "検査工程",
-          processingTime: 15,
-          equipmentCount: 1,
-          quality: { defect_detection_rate: 0.95 },
-          position: { x: 1100, y: 200 }
-        },
-        {
-          id: "shipping_store",
-          type: "store",
-          label: "出荷エリア",
-          name: "出荷エリア",
-          capacity: 100,
-          initialQuantity: 0,
-          bufferType: "output",
-          position: { x: 1300, y: 200 }
-        }
-      ],
-      edges: [
-        {
-          id: "edge_1",
-          source: "raw_material_store",
-          target: "cutting_process",
-          type: "material_flow"
-        },
-        {
-          id: "edge_2",
-          source: "cutting_process",
-          target: "semi_finished_store",
-          type: "material_flow"
-        },
-        {
-          id: "edge_3",
-          source: "semi_finished_store",
-          target: "assembly_process",
-          type: "material_flow"
-        },
-        {
-          id: "edge_4",
-          source: "assembly_process",
-          target: "finished_goods_store",
-          type: "material_flow"
-        },
-        {
-          id: "edge_5",
-          source: "finished_goods_store",
-          target: "inspection_process",
-          type: "material_flow"
-        },
-        {
-          id: "edge_6",
-          source: "inspection_process",
-          target: "shipping_store",
-          type: "material_flow"
-        }
-      ],
-      products: [
-        {
-          id: "product_a",
-          name: "製品A",
-          properties: {
-            type: "main_product",
-            priority: 1,
-            cycle_time: 90
-          }
-        }
-      ],
-      bom_items: [
-        {
-          id: "bom_1",
-          product_id: "product_a",
-          material_id: "raw_material",
-          quantity: 1,
-          unit: "piece"
-        }
-      ],
-      variants: [],
-      process_advanced_data: {
-        cutting_process: {
-          setup_time: 5,
-          changeover_time: 10,
-          efficiency: 0.95
-        },
-        assembly_process: {
-          setup_time: 8,
-          changeover_time: 15,
-          efficiency: 0.90
-        },
-        inspection_process: {
-          setup_time: 2,
-          changeover_time: 5,
-          efficiency: 0.98
-        }
-      }
-    };
-    
-    // ネットワークデータをlocalStorageに保存
-    localStorage.setItem('project_1_network', JSON.stringify(demoNetworkData));
-    console.log('Demo network data saved to localStorage');
-    
+    localStorage.setItem('project_1_network', JSON.stringify(networkDataWithAdvanced));
+    console.log('Demo project + network data saved to localStorage');
+
     // 保存確認
-    const saved = localStorage.getItem('projects');
-    console.log('Saved data verification:', saved);
+    const savedProjects = JSON.parse(localStorage.getItem('projects') || '[]');
+    const savedNetwork = JSON.parse(localStorage.getItem('project_1_network') || '{}');
+    console.log(`Verification: ${savedProjects.length} projects, ${savedNetwork.nodes?.length || 0} nodes, ${savedNetwork.edges?.length || 0} edges`);
   } catch (error) {
     console.error('localStorage save error:', error);
   }
-  
-  // APIが利用可能な場合はサーバーにも送信を試行
+
+  // APIにも送信を試行
   try {
     const response = await fetch('/api/projects', {
       method: 'POST',
@@ -207,24 +77,35 @@ export const resetProjectData = async (): Promise<void> => {
   } catch (error) {
     console.log('API not available, using localStorage only');
   }
-  
+
   console.log('=== プロジェクトデータリセット完了 ===');
 };
 
 export const checkProjectData = (): void => {
   const projects = localStorage.getItem('projects');
+  const network = localStorage.getItem('project_1_network');
   console.log('=== プロジェクトデータ確認 ===');
-  console.log('localStorage projects:', projects);
-  
+
   if (projects) {
     try {
       const parsed = JSON.parse(projects);
-      console.log('Parsed projects:', parsed);
       console.log('Projects count:', Array.isArray(parsed) ? parsed.length : 'Not an array');
+      parsed.forEach((p: any) => console.log(`  - ${p.name} (${p.id})`));
     } catch (error) {
       console.error('Parse error:', error);
     }
   } else {
     console.log('No projects found in localStorage');
+  }
+
+  if (network) {
+    try {
+      const parsed = JSON.parse(network);
+      console.log(`Network: ${parsed.nodes?.length || 0} nodes, ${parsed.edges?.length || 0} edges, ${parsed.products?.length || 0} products`);
+    } catch (error) {
+      console.error('Network parse error:', error);
+    }
+  } else {
+    console.log('No network data found');
   }
 };

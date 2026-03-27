@@ -1,25 +1,35 @@
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
 import { Project, ProjectFilter } from '../types/projectTypes';
+import { getFactoryDemoData } from '../data/factoryDemo';
 
 // デフォルトプロジェクト作成のヘルパー関数
 const createDefaultProjects = (): Project[] => {
   const defaultProject: Project = {
     id: '1',
-    name: 'デモファクトリー',
-    description: '完全な生産ラインを含むデモンストレーション用ファクトリーです。原材料から出荷まで7つの工程を含みます。',
+    name: 'BOM付き工場デモ',
+    description:
+      'プレス→切削→サブ組立A / 射出成形→SMT→サブ組立B → 最終組立→検査 の混流生産ライン。',
     category: 'manufacturing',
-    tags: ['デモ', '完全な生産ライン', 'シミュレーション対応'],
+    tags: ['デモ', 'BOM', '混流生産', 'シミュレーション対応'],
     status: 'active',
     version: '2.0.0',
     createdBy: 'system',
     createdAt: new Date('2025-01-15T12:00:00.000Z'),
-    updatedAt: new Date('2025-01-15T12:00:00.000Z'),
+    updatedAt: new Date(),
   };
-  
+
   // localStorageに保存
   localStorage.setItem('projects', JSON.stringify([defaultProject]));
-  console.log('🔍 Created default project:', defaultProject.name);
-  
+
+  // デモネットワークデータも保存
+  const demoNetworkData = getFactoryDemoData();
+  localStorage.setItem('project_1_network', JSON.stringify({
+    ...demoNetworkData,
+    variants: [],
+    process_advanced_data: {},
+  }));
+
+  console.log('Created default project with BOM demo data');
   return [defaultProject];
 };
 
@@ -371,8 +381,10 @@ const projectSlice = createSlice({
       })
       // updateProjectNetwork
       .addCase(updateProjectNetwork.fulfilled, (state, action) => {
-        // ネットワークデータはリアルタイムで更新されるため、
-        // ここでは成功通知のみ
+        // ReduxのnetworkDataも更新（SimulatorPageが参照するため）
+        if (action.meta?.arg?.networkData) {
+          state.networkData = action.meta.arg.networkData;
+        }
       });
   },
 });

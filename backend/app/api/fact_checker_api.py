@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from pydantic import BaseModel
 import asyncio
 
+from app.config import monitoring_settings
 from app.tools.enhanced_fact_checker import EnhancedFactChecker
 from app.core.data_integration import DynamicConfigurationManager
 from app.api.integration_api import get_config_manager
@@ -26,13 +27,13 @@ class FactCheckRequest(BaseModel):
 class RealtimeMonitorRequest(BaseModel):
     """リアルタイム監視リクエスト"""
     project_id: str
-    monitoring_duration: int = 3600  # 秒
+    monitoring_duration: int = monitoring_settings.monitoring_duration
     alert_threshold: str = "warning"  # "info", "warning", "error", "critical"
 
 class PredictiveAnalysisRequest(BaseModel):
     """予測分析リクエスト"""
     project_id: str
-    analysis_window: int = 1800  # 秒
+    analysis_window: int = monitoring_settings.analysis_window
     confidence_threshold: float = 0.7
 
 @router.post("/fact-check/comprehensive")

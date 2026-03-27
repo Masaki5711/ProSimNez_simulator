@@ -74,11 +74,103 @@ export const validateNetwork = (
   const storeEndErrors = validateStoreAtEnd(nodes, edges);
   errors.push(...storeEndErrors);
 
+  // 8. シミュレーション設定の検証
+  const simErrors = validateSimulationSettings(nodes, edges);
+  errors.push(...simErrors);
+
   return {
-    isValid: errors.length === 0,
+    isValid: errors.filter(e => e.severity === 'error').length === 0,
     errors,
     warnings,
   };
+};
+
+/**
+ * シミュレーション設定の完全性を検証
+ */
+const validateSimulationSettings = (
+  nodes: NetworkNode[],
+  edges: NetworkEdge[]
+): ValidationError[] => {
+  const errors: ValidationError[] = [];
+  const processTypes = ['machining', 'assembly', 'inspection', 'kitting', 'shipping', 'process'];
+
+  for (const node of nodes) {
+    const d = node.data;
+    const effectiveType = d.type || 'process';
+    if (!processTypes.includes(effectiveType)) continue;
+
+    // CT チェック
+    if (!d.cycleTime || d.cycleTime <= 0) {
+      errors.push({ type: 'missing_input', severity: 'error',
+        message: `${d.label}: サイクルタイムが未設定です`, nodeIds: [node.id] });
+    }
+    // 設備台数チェック
+    if (!d.equipmentCount || d.equipmentCount <= 0) {
+      errors.push({ type: 'missing_input', severity: 'error',
+        message: `${d.label}: 設備台数が未設定です`, nodeIds: [node.id] });
+    }
+    // inputs/outputs チェック
+    if (!d.inputs || d.inputs.length === 0) {
+      errors.push({ type: 'missing_input', severity: 'warning' as any,
+        message: `${d.label}: 投入材料(inputs)が未設定です`, nodeIds: [node.id] });
+    }
+    if (!d.outputs || d.outputs.length === 0) {
+      errors.push({ type: 'missing_output', severity: 'warning' as any,
+        message: `${d.label}: 出力製品(outputs)が未設定です`, nodeIds: [node.id] });
+    }
+    // inputMaterials チェック（詳細材料設定）
+    if (!d.inputMaterials || d.inputMaterials.length === 0) {
+      errors.push({ type: 'missing_input', severity: 'warning' as any,
+        message: `${d.label}: 工程材料設定(inputMaterials)が未設定です。右クリック→材料設定で設定してください`, nodeIds: [node.id] });
+    } else {
+      // 各材料のバッファ設定チェック
+      for (const im of d.inputMaterials) {
+        if (!im.bufferSettings) {
+          errors.push({ type: 'missing_input', severity: 'warning' as any,
+            message: `${d.label}: ${im.materialName || im.materialId}のバッファ設定が未設定です`, nodeIds: [node.id] });
+        }
+      }
+    }
+    // outputProducts チェック
+    if (!d.outputProducts || d.outputProducts.length === 0) {
+      errors.push({ type: 'missing_output', severity: 'warning' as any,
+        message: `${d.label}: 出力製品の詳細設定(outputProducts)が未設定です`, nodeIds: [node.id] });
+    }
+    // バッファ容量チェック
+    if (!d.inputBufferCapacity && (!d.inputMaterials || d.inputMaterials.length === 0)) {
+      errors.push({ type: 'missing_input', severity: 'warning' as any,
+        message: `${d.label}: 入力バッファ容量が未設定（無制限になります）`, nodeIds: [node.id] });
+    }
+  }
+
+  // 搬送設定チェック
+  for (const edge of edges) {
+    const ed = edge.data;
+    if (!ed) {
+      errors.push({ type: 'invalid_connection', severity: 'warning' as any,
+        message: `接続 ${edge.source}→${edge.target}: 搬送設定がありません`, edgeIds: [edge.id] });
+      continue;
+    }
+    if (!ed.transportTime || ed.transportTime <= 0) {
+      errors.push({ type: 'invalid_connection', severity: 'warning' as any,
+        message: `接続 ${edge.source}→${edge.target}: 搬送時間が未設定です`, edgeIds: [edge.id] });
+    }
+    const methods = (ed as any).transportMethods || [];
+    if (methods.length === 0) {
+      errors.push({ type: 'invalid_connection', severity: 'warning' as any,
+        message: `接続 ${edge.source}→${edge.target}: 搬送手段が未設定です`, edgeIds: [edge.id] });
+    } else {
+      for (const m of methods) {
+        if (!m.transportProducts || m.transportProducts.length === 0) {
+          errors.push({ type: 'invalid_connection', severity: 'warning' as any,
+            message: `接続 ${edge.source}→${edge.target}: 搬送製品が未設定です（${m.name}）`, edgeIds: [edge.id] });
+        }
+      }
+    }
+  }
+
+  return errors;
 };
 
 /**

@@ -2,232 +2,96 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## 🏗️ Architecture Overview
+## Project Overview
 
-This is a mixed-flow production line discrete simulation system with a React TypeScript frontend and FastAPI Python backend. The system simulates complex manufacturing networks with real-time visualization and collaborative editing capabilities.
+This is a **Claude Code plugin** - a collection of production-ready agents, skills, hooks, commands, rules, and MCP configurations. The project provides battle-tested workflows for software development using Claude Code.
 
-### Key Components
+## Architecture
 
-**Backend (FastAPI + SimPy)**
-- `app/core/master_simulator.py` - Main simulation orchestrator
-- `app/models/` - Data models (Factory, Process, Buffer, Product)
-- `app/api/` - REST API endpoints for simulation control
-- `app/websocket/` - WebSocket handlers for real-time communication
+All Claude Code components are in `.claude/` following the standard directory structure:
 
-**Frontend (React + TypeScript)**
-- `src/components/network/NetworkEditor.tsx` - Visual network design interface
-- `src/components/simulation/SimulationControl.tsx` - Simulation controls
-- `src/store/` - Redux state management
-- `src/hooks/useWebSocket.ts` - WebSocket integration
+- **.claude/agents/** - 17 specialized subagents for delegation (planner, code-reviewer, tdd-guide, etc.)
+- **.claude/skills/** - 88+ workflow definitions and domain knowledge (coding standards, patterns, testing)
+- **.claude/commands/** - 43 slash commands invoked by users (/tdd, /plan, /e2e, etc.)
+- **.claude/rules/** - Always-follow guidelines (common + per-language: rust, golang, typescript, python, swift, kotlin, perl, php)
+- **.claude/settings.json** - Hook configurations (PreToolUse, PostToolUse, SessionStart, Stop, etc.)
+- **.claude/contexts/** - Context switching templates (dev, research, review)
+- **.mcp.json** - MCP server configurations for external integrations
+- **scripts/** - Cross-platform Node.js utilities for hooks and setup
 
-**Simulation Engine**
-- SimPy-based discrete event simulation
-- Real-time inventory tracking and equipment monitoring
-- Multi-product, multi-process manufacturing simulation
+## Core Principles
 
-## 🔧 Development Commands
+1. **Agent-First** - Delegate to specialized agents for domain tasks
+2. **Test-Driven** - Write tests before implementation, 80%+ coverage required
+3. **Security-First** - Never compromise on security; validate all inputs
+4. **Immutability** - Always create new objects, never mutate existing ones
+5. **Plan Before Execute** - Plan complex features before writing code
 
-### Backend Commands
-```bash
-cd backend
+## Available Agents
 
-# Environment setup
-python -m venv venv
-venv\Scripts\activate  # Windows
-pip install -r requirements.txt
+| Agent | Purpose | When to Use |
+|-------|---------|-------------|
+| planner | Implementation planning | Complex features, refactoring |
+| architect | System design and scalability | Architectural decisions |
+| tdd-guide | Test-driven development | New features, bug fixes |
+| code-reviewer | Code quality and maintainability | After writing/modifying code |
+| security-reviewer | Vulnerability detection | Before commits, sensitive code |
+| build-error-resolver | Fix build/type errors | When build fails |
+| e2e-runner | End-to-end Playwright testing | Critical user flows |
+| refactor-cleaner | Dead code cleanup | Code maintenance |
+| doc-updater | Documentation and codemaps | Updating docs |
+| go-reviewer | Go code review | Go projects |
+| go-build-resolver | Go build errors | Go build failures |
+| database-reviewer | PostgreSQL/Supabase specialist | Schema design, query optimization |
+| python-reviewer | Python code review | Python projects |
+| kotlin-reviewer | Kotlin code review | Kotlin projects |
+| chief-of-staff | Communication triage and drafts | Multi-channel email, Slack, LINE |
+| loop-operator | Autonomous loop execution | Run loops safely, monitor stalls |
+| harness-optimizer | Harness config tuning | Reliability, cost, throughput |
 
-# Development server
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+## Agent Orchestration
 
-# Testing
-pytest
+Use agents proactively without user prompt:
+- Complex feature requests → **planner**
+- Code just written/modified → **code-reviewer**
+- Bug fix or new feature → **tdd-guide**
+- Architectural decision → **architect**
+- Security-sensitive code → **security-reviewer**
 
-# Code quality
-black app/
-flake8 app/
-```
+Use parallel execution for independent operations — launch multiple agents simultaneously.
 
-### Frontend Commands
-```bash
-cd frontend
+## Key Commands
 
-# Dependencies
-npm install
+- `/tdd` - Test-driven development workflow
+- `/plan` - Implementation planning
+- `/e2e` - Generate and run E2E tests
+- `/code-review` - Quality review
+- `/build-fix` - Fix build errors
+- `/learn` - Extract patterns from sessions
+- `/skill-create` - Generate skills from git history
 
-# Development server
-npm start
+## Security Guidelines
 
-# Build for production
-npm run build
+Before ANY commit:
+- No hardcoded secrets (API keys, passwords, tokens)
+- All user inputs validated
+- SQL injection prevention (parameterized queries)
+- XSS prevention (sanitized HTML)
+- CSRF protection enabled
+- Rate limiting on all endpoints
 
-# Testing
-npm test
+## Development Workflow
 
-# Code quality
-npm run lint
-npm run format
-```
+1. **Plan** — Use planner agent, identify dependencies and risks
+2. **TDD** — Use tdd-guide agent, write tests first, implement, refactor
+3. **Review** — Use code-reviewer agent, address CRITICAL/HIGH issues
+4. **Commit** — Conventional commits format (feat/fix/refactor/docs/test/chore/perf/ci)
 
-### Quick Start
-```bash
-# All-in-one development environment
-start_dev.bat
+## Development Notes
 
-# Environment check
-check_env.bat
-
-# Setup
-setup_env.bat
-```
-
-## 🏛️ Data Architecture
-
-### Network Model Structure
-- **Nodes**: Process nodes (machining, assembly, inspection, storage) and buffer nodes
-- **Edges**: Material flow connections between processes
-- **Products**: Multi-variant products with BOM (Bill of Materials)
-- **Advanced Process Data**: Detailed process parameters and material requirements
-
-### Simulation Data Flow
-1. **Project Data** → `ProjectNetworkData` (database)
-2. **Conversion** → `Factory` model (simulation)
-3. **Execution** → SimPy environment with real-time events
-4. **Monitoring** → WebSocket streams to frontend
-
-### Database Models
-- `projects` - Project metadata and settings
-- `project_network_data` - Network topology and configurations (JSONB)
-- `project_members` - Collaborative editing permissions
-- `project_history` - Change tracking
-
-## 🔄 Simulation Engine Integration
-
-### Core Simulation Classes
-- `MasterSimulator` - Orchestrates all simulation components
-- `EnhancedSimulationEngine` - SimPy-based discrete event engine
-- `ProcessSimulator` - Detailed process simulation with equipment
-- `MaterialFlowManager` - Inventory and material flow tracking
-- `QualityManager` - Quality control and inspection simulation
-
-### Real-time Communication
-- WebSocket endpoint: `/ws/simulation`
-- Project collaboration: `/api/projects/{project_id}/ws/{user_id}`
-- Event types: control, status updates, inventory changes, user activities
-
-## 🎯 Development Patterns
-
-### State Management
-- Redux Toolkit for global state
-- Separate slices: network, simulation, monitoring, project
-- WebSocket integration through custom hooks
-
-### Component Organization
-- Feature-based folder structure
-- Shared components in `/components/`
-- Page-level components in `/pages/`
-- Type definitions in `/types/`
-
-### API Integration
-- Axios for HTTP requests
-- Socket.IO for WebSocket communication
-- Type-safe API calls with TypeScript interfaces
-
-## 🧪 Testing Approach
-
-### Backend Testing
-```bash
-# Run all tests
-pytest
-
-# Specific test file
-pytest app/api/test_simulation.py
-
-# With coverage
-pytest --cov=app
-```
-
-### Frontend Testing
-```bash
-# Run tests
-npm test
-
-# Run tests in CI mode
-npm test -- --coverage --watchAll=false
-```
-
-## 🚀 Key Features to Understand
-
-### Network Editor
-- React Flow-based visual editor
-- Drag-and-drop process creation
-- Real-time collaboration with cursor tracking
-- Validation and error checking
-
-### Simulation Control
-- Start/pause/resume/stop controls
-- Speed adjustment (0.1x to 100x)
-- Real-time monitoring dashboards
-- KPI calculation and display
-
-### Project Management
-- Multi-user collaborative editing
-- Version control and history tracking
-- Permission-based access control
-
-## 🔧 Common Development Tasks
-
-### Adding New Process Types
-1. Update `ProcessNode.tsx` with new node type
-2. Add simulation logic in `ProcessSimulator`
-3. Update validation in `networkValidator.ts`
-4. Add UI components for configuration
-
-### Extending Simulation Features
-1. Modify `MasterSimulator` for orchestration
-2. Update data models in `app/models/`
-3. Add WebSocket events for real-time updates
-4. Update frontend monitoring components
-
-### Database Migrations
-```bash
-cd backend
-alembic revision --autogenerate -m "Description"
-alembic upgrade head
-```
-
-## 📊 Performance Considerations
-
-- Large networks (100+ nodes) may require optimization
-- WebSocket message throttling for high-frequency updates
-- React Flow performance: use `memo()` for complex nodes
-- SimPy simulation: batch event processing for better performance
-
-## 🔍 Debugging Tips
-
-### Backend Issues
-- Check logs: simulation events are logged with timestamps
-- Use FastAPI automatic docs: `http://localhost:8000/docs`
-- WebSocket debugging: monitor connection status in browser dev tools
-
-### Frontend Issues
-- Redux DevTools for state inspection
-- React DevTools for component debugging
-- Network tab for API call inspection
-- Console logs for WebSocket message tracking
-
-## 🏃‍♂️ Production Deployment
-
-### Docker Commands
-```bash
-# Build and run
-docker-compose -f docker-compose.prod.yml up -d
-
-# Individual services
-docker-compose up postgres -d
-docker-compose up backend -d
-docker-compose up frontend -d
-```
-
-### Environment Variables
-- Backend: `DATABASE_URL`, `JWT_SECRET`, `CORS_ORIGINS`
-- Frontend: `REACT_APP_API_URL`, `REACT_APP_WS_URL`
+- Package manager detection: npm, pnpm, yarn, bun (configurable via `CLAUDE_PACKAGE_MANAGER` env var)
+- Cross-platform: Windows, macOS, Linux support via Node.js scripts
+- Agent format: Markdown with YAML frontmatter (name, description, tools, model)
+- Skill format: Markdown with clear sections for when to use, how it works, examples
+- Hook format: JSON with matcher conditions in `.claude/settings.json`
+- File naming: lowercase with hyphens (e.g., `python-reviewer.md`, `tdd-workflow.md`)
